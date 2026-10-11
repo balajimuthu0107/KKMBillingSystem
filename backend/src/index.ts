@@ -31,7 +31,7 @@ app.use((req, _res, next) => {
 });
 
 // Root informational endpoint
-app.get('/', (_req, res) => {
+app.get(['/', '/api'], (_req, res) => {
   res.json({
     name: 'KKM Sea Foodz Billing API',
     version: '1.0.0',
@@ -45,10 +45,10 @@ app.get('/', (_req, res) => {
   });
 });
 
-// Mount API routes
-app.use('/api/health', healthRoutes);
-app.use('/api/customers', customerRoutes);
-app.use('/api/bills', billRoutes);
+// Mount API routes (supports both /api/* and /* paths for Vercel rewrites)
+app.use(['/api/health', '/health'], healthRoutes);
+app.use(['/api/customers', '/customers'], customerRoutes);
+app.use(['/api/bills', '/bills'], billRoutes);
 
 // Global error handler
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
