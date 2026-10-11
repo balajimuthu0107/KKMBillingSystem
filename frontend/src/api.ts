@@ -233,16 +233,32 @@ export const getCustomers = async (): Promise<CustomerData[]> => {
     const customersCol = collection(db, 'customers');
     const snapshot = await getDocs(customersCol);
     if (!snapshot.empty) {
-      const list: CustomerData[] = [];
+      const map = new Map<string, CustomerData>();
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
-        list.push({
-          id: docSnap.id,
-          name: data.name || '',
-          address: data.address || '',
-          balance: Number(data.balance) || 0,
-        });
+        const name = (data.name || '').trim();
+        const address = (data.address || '').trim();
+        const balance = Number(data.balance) || 0;
+        const key = `${name} - ${address}`;
+
+        const existing = map.get(key);
+        if (!existing) {
+          map.set(key, {
+            id: docSnap.id,
+            name,
+            address,
+            balance,
+          });
+        } else if (existing.balance === 0 && balance !== 0) {
+          map.set(key, {
+            id: docSnap.id,
+            name,
+            address,
+            balance,
+          });
+        }
       });
+      const list = Array.from(map.values());
       saveLocalCustomers(list);
       return list;
     } else {
@@ -346,12 +362,12 @@ export const updateCustomer = async (id: number | string, customer: CustomerData
     if (!targetDocId) {
       const q = query(
         collection(db, 'customers'), 
-        where('name', '==', customer.name.trim()),
-        where('address', '==', (customer.address || '').trim())
+        where('name', '==', customer.name.trim())
       );
       const snap = await getDocs(q);
       if (!snap.empty) {
-        targetDocId = snap.docs[0].id;
+        const match = snap.docs.find(d => (d.data().address || '').trim() === (customer.address || '').trim()) || snap.docs[0];
+        targetDocId = match.id;
       }
     }
 

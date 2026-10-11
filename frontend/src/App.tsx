@@ -85,10 +85,58 @@ function App() {
         if (Array.isArray(customersData)) {
           customersData.forEach(c => {
             if (c && c.name) {
-              customerMap[`${c.name} - ${c.address || ''}`] = c;
+              const key = `${c.name} - ${c.address || ''}`;
+              if (!customerMap[key] || c.balance !== 0 || customerMap[key].balance === 0) {
+                customerMap[key] = {
+                  ...customerMap[key],
+                  ...c,
+                  balance: c.balance !== 0 ? c.balance : (customerMap[key]?.balance || 0)
+                };
+              }
             }
           });
         }
+
+        // Synchronize customer balances with previous bills history
+        if (Array.isArray(billsData) && billsData.length > 0) {
+          const sortedBills = [...billsData].sort((a, b) => (parseInt(a.billNo) || 0) - (parseInt(b.billNo) || 0));
+          sortedBills.forEach(b => {
+            const bName = (b.customerName || '').trim();
+            const bAddr = (b.address || '').trim();
+            if (!bName) return;
+
+            const billBal = Number(b.finalBalance);
+            if (isNaN(billBal)) return;
+
+            const standardKey = `${bName} - ${bAddr}`;
+            let matchedKey = customerMap[standardKey] ? standardKey : null;
+            if (!matchedKey) {
+              matchedKey = Object.keys(customerMap).find(k => {
+                const c = customerMap[k];
+                return (c.name.trim() === bName || (bName === 'SRS' && c.name.includes('SRS'))) &&
+                       (!bAddr || !c.address || c.address.trim() === bAddr);
+              }) || null;
+            }
+
+            if (matchedKey) {
+              customerMap[matchedKey].balance = billBal;
+            } else {
+              customerMap[standardKey] = {
+                name: bName,
+                address: bAddr,
+                balance: billBal
+              };
+            }
+          });
+
+          // Ensure SRS and SRS சிவராஜ் are linked with the same balance
+          const srsBal = customerMap["SRS - விழுப்புரம்"]?.balance || customerMap["SRS சிவராஜ் - விழுப்புரம்"]?.balance;
+          if (srsBal !== undefined) {
+            if (customerMap["SRS - விழுப்புரம்"]) customerMap["SRS - விழுப்புரம்"].balance = srsBal;
+            if (customerMap["SRS சிவராஜ் - விழுப்புரம்"]) customerMap["SRS சிவராஜ் - விழுப்புரம்"].balance = srsBal;
+          }
+        }
+
         setSavedCustomers(customerMap);
         setSavedBills(Array.isArray(billsData) ? billsData : []);
         
@@ -150,11 +198,64 @@ function App() {
   const handleSearchChange = (key: string) => {
     setSearchKey(key);
     
-    // If they picked an exact match from the dropdown list
-    if (savedCustomers[key]) {
-      setCustomerName(savedCustomers[key].name);
-      setAddress(savedCustomers[key].address);
-      const bal = savedCustomers[key].balance;
+    const trimmedKey = key.trim();
+    // 1. Direct match
+    let matchedCustomer: CustomerData | undefined = savedCustomers[key] || savedCustomers[trimmedKey];
+
+    // 2. Case/whitespace insensitive match
+    if (!matchedCustomer) {
+      const lower = trimmedKey.toLowerCase();
+      const k = Object.keys(savedCustomers).find(cKey => cKey.trim().toLowerCase() === lower);
+      if (k) matchedCustomer = savedCustomers[k];
+    }
+
+    // 3. Name - Address parsing match
+    if (!matchedCustomer && trimmedKey.includes('-')) {
+      const parts = trimmedKey.split('-').map(s => s.trim());
+      const namePart = parts[0];
+      const addrPart = parts[1] || '';
+      const k = Object.keys(savedCustomers).find(cKey => {
+        const c = savedCustomers[cKey];
+        const nameMatch = c.name.trim() === namePart || 
+                          (namePart.includes('SRS') && c.name.includes('SRS')) ||
+                          c.name.includes(namePart);
+        const addrMatch = !addrPart || !c.address || c.address.trim() === addrPart;
+        return nameMatch && addrMatch;
+      });
+      if (k) matchedCustomer = savedCustomers[k];
+    }
+
+    // 4. Name only match
+    if (!matchedCustomer) {
+      const k = Object.keys(savedCustomers).find(cKey => {
+        const c = savedCustomers[cKey];
+        return c.name.trim() === trimmedKey || 
+               (trimmedKey.includes('SRS') && c.name.includes('SRS'));
+      });
+      if (k) matchedCustomer = savedCustomers[k];
+    }
+
+    if (matchedCustomer) {
+      setCustomerName(matchedCustomer.name);
+      setAddress(matchedCustomer.address);
+      
+      let bal = matchedCustomer.balance;
+      // Safety check: if customer balance is 0, check savedBills for any existing bill
+      if (!bal || bal === 0) {
+        const sorted = [...savedBills].sort((a, b) => (parseInt(b.billNo) || 0) - (parseInt(a.billNo) || 0));
+        const latestBill = sorted.find(b => {
+          const bName = (b.customerName || '').trim();
+          const bAddr = (b.address || '').trim();
+          const cName = matchedCustomer!.name.trim();
+          const cAddr = (matchedCustomer!.address || '').trim();
+          return (bName === cName || (cName.includes('SRS') && bName.includes('SRS'))) &&
+                 (!bAddr || !cAddr || bAddr === cAddr);
+        });
+        if (latestBill && latestBill.finalBalance) {
+          bal = Number(latestBill.finalBalance) || 0;
+        }
+      }
+
       setPrevBalance(bal === 0 ? '' : bal.toString());
     } else {
       // If it's a new customer being typed manually
@@ -175,9 +276,32 @@ function App() {
     setAddress(newAddress);
     const combined = `${newName} - ${newAddress}`;
     setSearchKey(combined);
-    
-    if (savedCustomers[combined]) {
-      const bal = savedCustomers[combined].balance;
+
+    const trimmedName = newName.trim();
+    const trimmedAddr = newAddress.trim();
+
+    const matchedKey = Object.keys(savedCustomers).find(k => {
+      const c = savedCustomers[k];
+      const nameMatch = c.name.trim() === trimmedName ||
+                        (trimmedName.includes('SRS') && c.name.includes('SRS'));
+      const addrMatch = !trimmedAddr || !c.address || c.address.trim() === trimmedAddr;
+      return nameMatch && addrMatch;
+    });
+
+    if (matchedKey) {
+      let bal = savedCustomers[matchedKey].balance;
+      if (!bal || bal === 0) {
+        const sorted = [...savedBills].sort((a, b) => (parseInt(b.billNo) || 0) - (parseInt(a.billNo) || 0));
+        const latestBill = sorted.find(b => {
+          const bName = (b.customerName || '').trim();
+          const bAddr = (b.address || '').trim();
+          return (bName === trimmedName || (trimmedName.includes('SRS') && bName.includes('SRS'))) &&
+                 (!bAddr || !trimmedAddr || bAddr === trimmedAddr);
+        });
+        if (latestBill && latestBill.finalBalance) {
+          bal = Number(latestBill.finalBalance) || 0;
+        }
+      }
       setPrevBalance(bal === 0 ? '' : bal.toString());
     } else {
       setPrevBalance('');
@@ -463,9 +587,9 @@ function App() {
                   <option key={key} value={key} />
                 ))}
               </datalist>
-              {savedCustomers[`${customerName} - ${address}`] && savedCustomers[`${customerName} - ${address}`].balance !== 0 && (
+              {((Number(prevBalance) || 0) > 0 || (savedCustomers[`${customerName} - ${address}`] && savedCustomers[`${customerName} - ${address}`].balance !== 0)) && (
                 <div style={{ marginTop: '10px', color: '#842029', fontWeight: 'bold', fontSize: '1.1em', padding: '10px', backgroundColor: '#f8d7da', border: '1px solid #f5c2c7', borderRadius: '5px' }}>
-                  ⚠️ This customer has a Previous Balance (முன் பாக்கி) of: Rs. {formatCurrency(savedCustomers[`${customerName} - ${address}`].balance)}
+                  ⚠️ This customer has a Previous Balance (முன் பாக்கி) of: Rs. {formatCurrency(Number(prevBalance) || savedCustomers[`${customerName} - ${address}`]?.balance || 0)}
                 </div>
               )}
             </div>
