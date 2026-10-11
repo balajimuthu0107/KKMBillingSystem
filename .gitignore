@@ -1,1 +1,34 @@
-node_modules
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Environment variables & Sensitive keys
+.env
+.env.*
+*.env
+backend/.env
+frontend/.env
+*.local
+serviceAccountKey.json
+*/serviceAccountKey.json
+firebase-key*.json
+*.pem
+*.key
+
+# Build & compiled outputs
+dist/
+*/dist/
+build/
+*/build/
+
+# IDE & OS temporary files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

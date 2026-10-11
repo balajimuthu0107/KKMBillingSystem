@@ -45,8 +45,10 @@ function App() {
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, '0');
     const dd = String(today.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
+    return `${dd}-${mm}-${yyyy}`;
   };
+
+  const datePickerRef = useRef<HTMLInputElement>(null);
 
   const [billNo, setBillNo] = useState<string>('101');
   
@@ -113,7 +115,7 @@ function App() {
 
   const loadBill = (bill: SavedBill) => {
     setBillNo(bill.billNo);
-    setDate(formatDateToYMD(bill.date));
+    setDate(formatDateToDMY(bill.date));
     setCustomerName(bill.customerName);
     setAddress(bill.address);
     setSearchKey(`${bill.customerName} - ${bill.address}`);
@@ -399,8 +401,50 @@ function App() {
               <input type="text" value={billNo} onChange={e => setBillNo(e.target.value)} />
             </div>
             <div className="form-group">
-              <label>Date (DD-MM-YYYY: {formatDisplayDate(date)})</label>
-              <input type="date" value={date} onChange={e => setDate(e.target.value)} />
+              <label>Date (DD-MM-YYYY)</label>
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <input 
+                  type="text" 
+                  value={date} 
+                  onChange={e => setDate(e.target.value)} 
+                  placeholder="DD-MM-YYYY"
+                  style={{ width: '100%', paddingRight: '42px', fontWeight: 'bold', fontSize: '1rem' }}
+                />
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    try {
+                      datePickerRef.current?.showPicker?.();
+                    } catch {
+                      datePickerRef.current?.focus();
+                    }
+                  }}
+                  style={{
+                    position: 'absolute',
+                    right: '8px',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '20px',
+                    lineHeight: 1
+                  }}
+                  title="Click to select date from calendar"
+                >
+                  📅
+                </button>
+                <input 
+                  type="date" 
+                  ref={datePickerRef}
+                  value={formatDateToYMD(date)}
+                  onChange={e => {
+                    if (e.target.value) {
+                      const [y, m, d] = e.target.value.split('-');
+                      setDate(`${d}-${m}-${y}`);
+                    }
+                  }}
+                  style={{ position: 'absolute', opacity: 0, width: 0, height: 0, pointerEvents: 'none', bottom: 0, right: 0 }}
+                />
+              </div>
             </div>
             
             <div className="form-group" style={{ gridColumn: '1 / -1' }}>
