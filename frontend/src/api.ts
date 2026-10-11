@@ -99,7 +99,8 @@ export const DEFAULT_INITIAL_CUSTOMERS: CustomerData[] = [
   { id: 8, name: "ராஜா", address: "கண்டாச்சிபுரம்", balance: 0 },
   { id: 9, name: "ஏழுமலை", address: "கண்டாச்சிபுரம்", balance: 0 },
   { id: 10, name: "சுரேஷ்", address: "உளுந்தூர்பேட்டை", balance: 0 },
-  { id: 11, name: "விஜி", address: "விருத்தாச்சலம்", balance: 0 }
+  { id: 11, name: "விஜி", address: "விருத்தாச்சலம்", balance: 0 },
+  { id: 12, name: "SRS சிவராஜ்", address: "விழுப்புரம்", balance: 0 }
 ];
 
 // Local storage backup helpers
@@ -185,15 +186,25 @@ export const getLocalCustomers = (): CustomerData[] => {
       return [...DEFAULT_INITIAL_CUSTOMERS];
     }
     const parsed = JSON.parse(raw);
+    let list: CustomerData[] = [];
     if (Array.isArray(parsed)) {
-      return parsed;
+      list = parsed;
+    } else if (parsed && typeof parsed === 'object') {
+      list = Object.values(parsed).filter((c: any) => c && typeof c === 'object' && c.name) as CustomerData[];
     }
-    if (parsed && typeof parsed === 'object') {
-      const list = Object.values(parsed).filter((c: any) => c && typeof c === 'object' && c.name) as CustomerData[];
+
+    // Ensure all default initial customers are present in cached list
+    let modified = false;
+    for (const def of DEFAULT_INITIAL_CUSTOMERS) {
+      if (!list.some(c => c.name === def.name && c.address === def.address)) {
+        list.push({ ...def, id: def.id || Date.now() });
+        modified = true;
+      }
+    }
+    if (modified) {
       saveLocalCustomers(list);
-      return list;
     }
-    return [...DEFAULT_INITIAL_CUSTOMERS];
+    return list.length > 0 ? list : [...DEFAULT_INITIAL_CUSTOMERS];
   } catch {
     return [...DEFAULT_INITIAL_CUSTOMERS];
   }

@@ -20,7 +20,8 @@ export const DEFAULT_INITIAL_CUSTOMERS: Omit<CustomerData, 'id'>[] = [
   { name: "ராஜா", address: "கண்டாச்சிபுரம்", balance: 0 },
   { name: "ஏழுமலை", address: "கண்டாச்சிபுரம்", balance: 0 },
   { name: "சுரேஷ்", address: "உளுந்தூர்பேட்டை", balance: 0 },
-  { name: "விஜி", address: "விருத்தாச்சலம்", balance: 0 }
+  { name: "விஜி", address: "விருத்தாச்சலம்", balance: 0 },
+  { name: "SRS சிவராஜ்", address: "விழுப்புரம்", balance: 0 }
 ];
 
 // Fallback in-memory customer storage

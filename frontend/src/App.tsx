@@ -36,7 +36,8 @@ const INITIAL_CUSTOMERS: Record<string, CustomerData> = {
   "ராஜா - கண்டாச்சிபுரம்": { name: "ராஜா", address: "கண்டாச்சிபுரம்", balance: 0 },
   "ஏழுமலை - கண்டாச்சிபுரம்": { name: "ஏழுமலை", address: "கண்டாச்சிபுரம்", balance: 0 },
   "சுரேஷ் - உளுந்தூர்பேட்டை": { name: "சுரேஷ்", address: "உளுந்தூர்பேட்டை", balance: 0 },
-  "விஜி - விருத்தாச்சலம்": { name: "விஜி", address: "விருத்தாச்சலம்", balance: 0 }
+  "விஜி - விருத்தாச்சலம்": { name: "விஜி", address: "விருத்தாச்சலம்", balance: 0 },
+  "SRS சிவராஜ் - விழுப்புரம்": { name: "SRS சிவராஜ்", address: "விழுப்புரம்", balance: 0 }
 };
 
 function App() {
