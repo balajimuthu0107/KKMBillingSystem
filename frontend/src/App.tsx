@@ -37,7 +37,7 @@ const INITIAL_CUSTOMERS: Record<string, CustomerData> = {
   "ஏழுமலை - கண்டாச்சிபுரம்": { name: "ஏழுமலை", address: "கண்டாச்சிபுரம்", balance: 0 },
   "சுரேஷ் - உளுந்தூர்பேட்டை": { name: "சுரேஷ்", address: "உளுந்தூர்பேட்டை", balance: 0 },
   "விஜி - விருத்தாச்சலம்": { name: "விஜி", address: "விருத்தாச்சலம்", balance: 0 },
-  "SRS சிவராஜ் - விழுப்புரம்": { name: "SRS சிவராஜ்", address: "விழுப்புரம்", balance: 0 }
+  "SRS சிவராஜ் - விழுப்புரம்": { name: "SRS", address: "விழுப்புரம்", balance: 0 }
 };
 
 function App() {
@@ -652,7 +652,7 @@ function App() {
               <input type="number" value={prevBalance} onChange={e => setPrevBalance(e.target.value)} />
             </div>
             <div className="form-group">
-              <label>Advance (முன் வரவு)</label>
+              <label>Advance (வரவு)</label>
               <input type="number" value={advance} onChange={e => setAdvance(e.target.value)} placeholder="0" />
             </div>
           </div>
@@ -795,12 +795,12 @@ function App() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '10px 0' }}>
             <img src={logoImg} alt="Logo Left" style={{ width: '70px', height: '70px', objectFit: 'contain', borderRadius: '50%' }} />
             <div style={{ textAlign: 'center', flex: 1 }}>
-              <h1 style={{ margin: '0 0 5px 0' }}>KKM SEA FOODZ</h1>
+              <h1 style={{ margin: '0 0 5px 0' }}>KKM SEA FOODS</h1>
               <h2 style={{ margin: 0, padding: 0, border: 'none' }}>FISH COMMISSION AGENT</h2>
             </div>
             <img src={logoImg} alt="Logo Right" style={{ width: '70px', height: '70px', objectFit: 'contain', borderRadius: '50%' }} />
           </div>
-          <p>No.165, Murugan Kovil Sreet, MALAYARASANKUPPM, Villupuram-605701</p>
+          <p>No.165, Murugan Kovil Street, MALAIYARASANKUPPAM, Villupuram-605701</p>
         </div>
 
         <div className="bill-info">
