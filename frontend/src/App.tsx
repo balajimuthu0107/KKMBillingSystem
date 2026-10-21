@@ -6,17 +6,18 @@ import type { CustomerData, SavedBill, BillItem } from './api';
 
 // Common fish types in Tamil
 const FISH_TYPES = [
-  'ஜிலேபி (Jalebi)',
+  'ரூப் (MEDIUM)',
   'சங்கரா (Sankara)',
   'வஞ்சரம் (Vanjaram)',
   'மத்தி (Mathi)',
-  'வவ்வால் (BIG)',
+  'ரூப் (BIG)',
   'இறால் (Prawn)',
   'நெத்திலி (Nethili)',
   'சூரை (Tuna)',
   'கானாங்கெளுத்தி (Mackerel)',
-  'வவ்வால் (MEDIUM)',
-  'வவ்வால் (SMALL)',
+  'ஜிலேபி (BIG)',
+  'ஜிலேபி (MEDIUM)',
+  'ரூப் (SMALL)',
   'பங்காஸ் (Pangas)',
   'கெண்டை (Kendai)',
   'நண்டு (Crab)',
@@ -790,7 +791,12 @@ function App() {
           <h3>ஸ்ரீ பச்சையம்மன் துணை</h3>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
             <span><b>CASH / CREDIT BILL</b></span>
-            <span>Mobile: 9787178910<br/>8695172090</span>
+            <span style={{ display: 'inline-block', lineHeight: '1.6', textAlign: 'left' }}>
+              <span style={{ display: 'flex', gap: '4px' }}>
+                <span style={{ whiteSpace: 'nowrap' }}>Mobile:</span>
+                  9787178910<br/>8695172090
+              </span>
+            </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '10px 0' }}>
             <img src={logoImg} alt="Logo Left" style={{ width: '70px', height: '70px', objectFit: 'contain', borderRadius: '50%' }} />
@@ -800,7 +806,7 @@ function App() {
             </div>
             <img src={logoImg} alt="Logo Right" style={{ width: '70px', height: '70px', objectFit: 'contain', borderRadius: '50%' }} />
           </div>
-          <p>No.165, Murugan Kovil Street, MALAIYARASANKUPPAM, Villupuram-605701</p>
+          <p><b>No.165, MURUGAN KOVIL STREET , MALAIYARASANKUPPAM, VILLUPURAM-605701</b></p>
         </div>
 
         <div className="bill-info">
@@ -836,24 +842,20 @@ function App() {
             
             {/* Previous Balance Row */}
             <tr>
-              <td colSpan={2} className="text-right font-bold" style={{color: 'blue'}}>முன் பாக்கி =&gt;</td>
-              <td></td>
-              <td></td>
-              <td className="font-bold">{formatCurrency(Number(prevBalance) || 0)}</td>
+              <td colSpan={4} className="text-right font-bold" style={{color: 'blue'}}>முன் பாக்கி =&gt;</td>
+              <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(Number(prevBalance) || 0)}</td>
             </tr>
 
             {/* Subtotal Row */}
             <tr>
               <td colSpan={4}></td>
-              <td className="font-bold">{formatCurrency(subTotal)}</td>
+              <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(subTotal)}</td>
             </tr>
 
             {/* Advance Row */}
             <tr>
-              <td colSpan={2} className="text-right font-bold" style={{color: 'blue'}}>Advance (வரவு) =&gt;</td>
-              <td></td>
-              <td></td>
-              <td className="font-bold">{formatCurrency(Number(advance) || 0)}</td>
+              <td colSpan={4} className="text-right font-bold" style={{color: 'blue'}}>Advance (வரவு) =&gt;</td>
+              <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(Number(advance) || 0)}</td>
             </tr>
 
             {/* Final Balance Row */}
