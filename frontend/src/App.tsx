@@ -864,15 +864,15 @@ function App() {
                 <b>Thank You!</b>
               </td>
               <td className="font-bold">Total Amount</td>
-              <td className="font-bold">{formatCurrency(subTotal)}</td>
+              <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(subTotal)}</td>
             </tr>
             <tr>
               <td className="font-bold">Advance</td>
-              <td className="font-bold">{formatCurrency(Number(advance) || 0)}</td>
+              <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(Number(advance) || 0)}</td>
             </tr>
             <tr>
               <td className="font-bold">Balance</td>
-              <td className="font-bold">{formatCurrency(finalBalance)}</td>
+              <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(finalBalance)}</td>
             </tr>
           </tbody>
         </table>
