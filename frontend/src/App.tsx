@@ -330,11 +330,10 @@ function App() {
   };
 
   const currentTotal = items.reduce((sum, item) => {
-    const kg = Number(item.kg);
     const qty = Number(item.quantity ?? item.qty) || 0;
     const rate = Number(item.price ?? item.rate) || 0;
-    const multiplier = kg > 0 ? kg : qty;
-    return sum + multiplier * rate;
+    // Amount = Qty × Rate
+    return sum + qty * rate;
   }, 0);
   const subTotal = currentTotal + (Number(prevBalance) || 0);
   const finalBalance = subTotal - (Number(advance) || 0);
@@ -729,10 +728,7 @@ function App() {
                 <label>Qty (Box)</label>
                 <input type="number" min="1" value={item.qty} onChange={e => updateItem(item.id, 'qty', e.target.value)} />
               </div>
-              <div className="form-group">
-                <label>KG</label>
-                <input type="number" min="0" step="0.1" value={item.kg ?? ''} onChange={e => updateItem(item.id, 'kg', e.target.value)} placeholder="0.0" />
-              </div>
+
               <div className="form-group">
                 <label>Rate (Rs)</label>
                 <input type="number" min="0" value={item.rate} onChange={e => updateItem(item.id, 'rate', e.target.value)} />
@@ -925,10 +921,9 @@ function App() {
           <thead>
             <tr>
               <th style={{ width: '10%' }}>SL No.</th>
-              <th style={{ width: '40%' }}>Particulars</th>
-              <th style={{ width: '12%' }}>Qty<br/><small>Box</small></th>
-              <th style={{ width: '12%' }}>KG<br/><small>Weight</small></th>
-              <th style={{ width: '26%' }}>Amount<br/><small>Rs.</small></th>
+              <th style={{ width: '45%' }}>Particulars</th>
+              <th style={{ width: '15%' }}>Qty<br/><small>Box / (KG)</small></th>
+              <th style={{ width: '30%' }}>Amount<br/><small></small></th>
             </tr>
           </thead>
           <tbody>
@@ -937,32 +932,33 @@ function App() {
                 <td className="text-center">{index + 1}</td>
                 <td>{item.particulars}</td>
                 <td className="text-center">{item.qty}</td>
-                <td className="text-center">{item.kg !== undefined && item.kg !== '' ? item.kg : '-'}</td>
-                <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency((Number(item.kg) > 0 ? Number(item.kg) : (Number(item.qty) || 0)) * (Number(item.rate) || 0))}</td>
+                <td className="font-bold" style={{ textAlign: 'right' }}>
+                  {formatCurrency((Number(item.quantity ?? item.qty) || 0) * (Number(item.price ?? item.rate) || 0))}
+                </td>
               </tr>
             ))}
             
             {/* Previous Balance Row */}
             <tr>
-              <td colSpan={4} className="text-right font-bold" style={{color: 'blue'}}>முன் பாக்கி =&gt;</td>
+              <td colSpan={3} className="text-right font-bold" style={{color: 'blue'}}>முன் பாக்கி =&gt;</td>
               <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(Number(prevBalance) || 0)}</td>
             </tr>
 
             {/* Subtotal Row */}
             <tr>
-              <td colSpan={4}></td>
+              <td colSpan={3}></td>
               <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(subTotal)}</td>
             </tr>
 
             {/* Advance Row */}
             <tr>
-              <td colSpan={4} className="text-right font-bold" style={{color: 'blue'}}>Advance (வரவு) =&gt;</td>
+              <td colSpan={3} className="text-right font-bold" style={{color: 'blue'}}>Advance (வரவு) =&gt;</td>
               <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(Number(advance) || 0)}</td>
             </tr>
 
             {/* Final Balance Row */}
             <tr>
-              <td colSpan={2} rowSpan={3} style={{verticalAlign: 'bottom', borderRight: 'none'}}>
+              <td colSpan={1} rowSpan={3} style={{verticalAlign: 'bottom', borderRight: 'none'}}>
                 <b>Thank You!</b>
               </td>
               <td colSpan={2} className="font-bold">Total Amount</td>
