@@ -331,7 +331,13 @@ function App() {
     setItems(items.filter(item => item.id !== id));
   };
 
-  const currentTotal = items.reduce((sum, item) => sum + ((Number(item.kg) || 0) * (Number(item.price ?? item.rate) || 0)), 0);
+  const currentTotal = items.reduce((sum, item) => {
+    const kg = Number(item.kg);
+    const qty = Number(item.quantity ?? item.qty) || 0;
+    const rate = Number(item.price ?? item.rate) || 0;
+    const multiplier = kg > 0 ? kg : qty;
+    return sum + multiplier * rate;
+  }, 0);
   const subTotal = currentTotal + (Number(prevBalance) || 0);
   const finalBalance = subTotal - (Number(advance) || 0);
 
@@ -840,7 +846,7 @@ function App() {
                 <td>{item.particulars}</td>
                 <td className="text-center">{item.qty}</td>
                 <td className="text-center">{item.kg !== undefined && item.kg !== '' ? item.kg : '-'}</td>
-                <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency((Number(item.kg) || 0) * (Number(item.rate) || 0))}</td>
+                <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency((Number(item.kg) > 0 ? Number(item.kg) : (Number(item.qty) || 0)) * (Number(item.rate) || 0))}</td>
               </tr>
             ))}
             
