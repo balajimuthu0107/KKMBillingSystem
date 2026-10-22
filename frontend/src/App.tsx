@@ -4,7 +4,7 @@ import logoImg from './assets/seafoodz.jpeg';
 import { getCustomers, getBills, createBill, updateCustomer, deleteBill, formatDisplayDate, formatDateToDMY, formatDateToYMD } from './api';
 import type { CustomerData, SavedBill, BillItem } from './api';
 
-// Common fish types in Tamil
+
 const FISH_TYPES = [
   'ரூப் (MEDIUM)',
   'சங்கரா (Sankara)',
@@ -25,7 +25,7 @@ const FISH_TYPES = [
   
 ];
 
-// Pre-loaded customers as requested
+
 const INITIAL_CUSTOMERS: Record<string, CustomerData> = {
   "பச்சையப்பன் - கந்தம்பாளையம்": { name: "பச்சையப்பன்", address: "கந்தம்பாளையம்", balance: 0 },
   "முருகன் - வேட்டவலம்": { name: "முருகன்", address: "வேட்டவலம்", balance: 0 },
@@ -58,7 +58,6 @@ function App() {
   
   const [customerName, setCustomerName] = useState('');
   const [address, setAddress] = useState('');
-  // This state holds what is typed in the combined search box
   const [searchKey, setSearchKey] = useState('');
   
   const [items, setItems] = useState<BillItem[]>(() => [
@@ -98,7 +97,7 @@ function App() {
           });
         }
 
-        // Synchronize customer balances with previous bills history
+
         if (Array.isArray(billsData) && billsData.length > 0) {
           const sortedBills = [...billsData].sort((a, b) => (parseInt(a.billNo) || 0) - (parseInt(b.billNo) || 0));
           sortedBills.forEach(b => {
@@ -130,7 +129,7 @@ function App() {
             }
           });
 
-          // Ensure SRS and SRS சிவராஜ் are linked with the same balance
+
           const srsBal = customerMap["SRS - விழுப்புரம்"]?.balance || customerMap["SRS சிவராஜ் - விழுப்புரம்"]?.balance;
           if (srsBal !== undefined) {
             if (customerMap["SRS - விழுப்புரம்"]) customerMap["SRS - விழுப்புரம்"].balance = srsBal;
@@ -158,7 +157,7 @@ function App() {
 
   const [showHistoryModal, setShowHistoryModal] = useState(false);
 
-  // Modal State for "Previous Balance Payment"
+
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentCustomerKey, setPaymentCustomerKey] = useState('');
   const [paymentAmount, setPaymentAmount] = useState<string>('');
@@ -193,24 +192,24 @@ function App() {
     }
   };
   
-  // Ref for the bill container to download image
+
   const billPreviewRef = useRef<HTMLDivElement>(null);
 
   const handleSearchChange = (key: string) => {
     setSearchKey(key);
     
     const trimmedKey = key.trim();
-    // 1. Direct match
+
     let matchedCustomer: CustomerData | undefined = savedCustomers[key] || savedCustomers[trimmedKey];
 
-    // 2. Case/whitespace insensitive match
+
     if (!matchedCustomer) {
       const lower = trimmedKey.toLowerCase();
       const k = Object.keys(savedCustomers).find(cKey => cKey.trim().toLowerCase() === lower);
       if (k) matchedCustomer = savedCustomers[k];
     }
 
-    // 3. Name - Address parsing match
+
     if (!matchedCustomer && trimmedKey.includes('-')) {
       const parts = trimmedKey.split('-').map(s => s.trim());
       const namePart = parts[0];
@@ -226,7 +225,7 @@ function App() {
       if (k) matchedCustomer = savedCustomers[k];
     }
 
-    // 4. Name only match
+
     if (!matchedCustomer) {
       const k = Object.keys(savedCustomers).find(cKey => {
         const c = savedCustomers[cKey];
@@ -241,9 +240,7 @@ function App() {
       setAddress(matchedCustomer.address);
       
       let bal = matchedCustomer.balance;
-      // Only fall back to savedBills if this customer has NO bills at all (brand new customer).
-      // If they have bills, savedCustomers.balance is the authoritative value
-      // (0 means paid in full after a payment, not "unknown").
+
       const cName = matchedCustomer.name.trim();
       const cAddr = (matchedCustomer.address || '').trim();
       const hasBills = savedBills.some(b => {
@@ -253,16 +250,16 @@ function App() {
                (!bAddr || !cAddr || bAddr === cAddr);
       });
       if ((!bal || bal === 0) && !hasBills) {
-        // Brand-new customer with no bills — nothing to show
+
         bal = 0;
       } else if ((!bal || bal === 0) && hasBills) {
-        // Has bills AND balance is 0 → paid in full, show nothing (0 = clear)
+
         bal = 0;
       }
 
       setPrevBalance(bal === 0 ? '' : bal.toString());
     } else {
-      // If it's a new customer being typed manually
+
       if (key.includes('-')) {
         const parts = key.split('-');
         setCustomerName(parts[0].trim());
@@ -294,8 +291,7 @@ function App() {
 
     if (matchedKey) {
       let bal = savedCustomers[matchedKey].balance;
-      // Only fall back to savedBills if this customer has NO bills at all.
-      // If they have bills, savedCustomers.balance is the authoritative value.
+
       const hasBillsForCustomer = savedBills.some(b => {
         const bName = (b.customerName || '').trim();
         const bAddr = (b.address || '').trim();
@@ -389,7 +385,7 @@ function App() {
 
       alert(`Bill Saved! ${customerName}'s new balance is Rs.${formatCurrency(finalBalance)}`);
       
-      // Reset for next bill
+
       setBillNo((parseInt(billNo) + 1).toString());
       setDate(getTodayDate());
       setCustomerName('');
@@ -447,8 +443,10 @@ function App() {
   };
 
   const handleSavePayment = async () => {
-    if (!paymentCustomerKey || !savedCustomers[paymentCustomerKey]) {
-      alert("Please select a valid customer.");
+
+    const resolvedKey = resolveCustomerKey(paymentCustomerKey);
+    if (!resolvedKey || !savedCustomers[resolvedKey]) {
+      alert("Please select a valid customer from the list.");
       return;
     }
     const payAmt = Number(paymentAmount) || 0;
@@ -457,8 +455,8 @@ function App() {
       return;
     }
 
-    const customer = savedCustomers[paymentCustomerKey];
-    const currentBalance = getEffectiveBalance(paymentCustomerKey);
+    const customer = savedCustomers[resolvedKey];
+    const currentBalance = getEffectiveBalance(resolvedKey);
     const newBalance = currentBalance - payAmt;
 
     try {
@@ -472,16 +470,37 @@ function App() {
         updatedCustomerData.id = savedCust.id;
       }
 
+
       const updatedCustomers = {
         ...savedCustomers,
-        [paymentCustomerKey]: updatedCustomerData
+        [resolvedKey]: updatedCustomerData
       };
 
       setSavedCustomers(updatedCustomers);
+
+
+      const cName = customer.name.trim();
+      const cAddr = (customer.address || '').trim();
+      setSavedBills(prev => {
+        const customerBills = prev.filter(b => {
+          const bName = (b.customerName || '').trim();
+          const bAddr = (b.address || '').trim();
+          const nameMatch = bName === cName || (cName.includes('SRS') && bName.includes('SRS'));
+          const addrMatch = !bAddr || !cAddr || bAddr === cAddr;
+          return nameMatch && addrMatch;
+        });
+        if (customerBills.length === 0) return prev;
+        const sorted = [...customerBills].sort((a, b) => (parseInt(b.billNo) || 0) - (parseInt(a.billNo) || 0));
+        const latestBillNo = sorted[0].billNo;
+        return prev.map(b => {
+          if (b.billNo === latestBillNo) return { ...b, finalBalance: newBalance };
+          return b;
+        });
+      });
       
       alert(`Payment Saved! ${customer.name}'s new balance is Rs.${formatCurrency(newBalance)}`);
       
-      // Reset modal
+
       setShowPaymentModal(false);
       setPaymentCustomerKey('');
       setPaymentAmount('');
@@ -494,19 +513,52 @@ function App() {
     return num.toLocaleString('en-IN');
   };
 
-  // Get the real balance for a customer by also checking savedBills
-  // (savedCustomers.balance can be stale/0 if it wasn't synced after bill save)
+
+  const resolveCustomerKey = (inputKey: string): string | null => {
+    if (!inputKey) return null;
+    const trimmed = inputKey.trim();
+
+    if (savedCustomers[trimmed]) return trimmed;
+
+    const lower = trimmed.toLowerCase();
+    const exactCI = Object.keys(savedCustomers).find(k => k.trim().toLowerCase() === lower);
+    if (exactCI) return exactCI;
+
+    if (trimmed.includes('-')) {
+      const parts = trimmed.split('-').map(s => s.trim());
+      const namePart = parts[0];
+      const addrPart = parts.slice(1).join('-').trim();
+      const k = Object.keys(savedCustomers).find(cKey => {
+        const c = savedCustomers[cKey];
+        const nameMatch = c.name.trim() === namePart ||
+                          (namePart.includes('SRS') && c.name.includes('SRS')) ||
+                          c.name.includes(namePart);
+        const addrMatch = !addrPart || !c.address || c.address.trim() === addrPart;
+        return nameMatch && addrMatch;
+      });
+      if (k) return k;
+    }
+
+    const nameOnly = Object.keys(savedCustomers).find(cKey => {
+      const c = savedCustomers[cKey];
+      return c.name.trim() === trimmed || (trimmed.includes('SRS') && c.name.includes('SRS'));
+    });
+    return nameOnly || null;
+  };
+
+
   const getEffectiveBalance = (customerKey: string): number => {
-    const customer = savedCustomers[customerKey];
+    const resolvedKey = resolveCustomerKey(customerKey);
+    const customer = resolvedKey ? savedCustomers[resolvedKey] : savedCustomers[customerKey];
     if (!customer) return 0;
 
-    // If balance is non-zero, trust it directly
+
     if (customer.balance && customer.balance !== 0) return customer.balance;
 
-    // Balance is 0 — check if this customer has ANY bills
+
     const cName = customer.name.trim();
     const cAddr = (customer.address || '').trim();
-    const hasBills = savedBills.some(b => {
+    const customerBills = savedBills.filter(b => {
       const bName = (b.customerName || '').trim();
       const bAddr = (b.address || '').trim();
       const nameMatch = bName === cName || (cName.includes('SRS') && bName.includes('SRS')) || bName.includes(cName) || cName.includes(bName);
@@ -514,8 +566,14 @@ function App() {
       return nameMatch && addrMatch;
     });
 
-    // If they have bills and balance is 0 → paid in full → return 0 (DON'T override with old bill data)
-    // If they have no bills → brand new customer → return 0
+    if (customerBills.length === 0) return 0;
+
+
+    const sortedBills = [...customerBills].sort((a, b) => (parseInt(b.billNo) || 0) - (parseInt(a.billNo) || 0));
+    const latestBillBalance = Number(sortedBills[0].finalBalance) || 0;
+
+
+    if (latestBillBalance !== 0) return latestBillBalance;
     return 0;
   };
 
@@ -797,13 +855,16 @@ function App() {
               </datalist>
             </div>
 
-            {paymentCustomerKey && savedCustomers[paymentCustomerKey] && (() => {
-              const effectiveBal = getEffectiveBalance(paymentCustomerKey);
+            {(() => {
+              const resolvedKey = resolveCustomerKey(paymentCustomerKey);
+              if (!paymentCustomerKey || !resolvedKey) return null;
+              const effectiveBal = getEffectiveBalance(resolvedKey);
               return (
-                <div style={{ backgroundColor: effectiveBal > 0 ? '#fff3cd' : '#f8f9fa', padding: '10px', borderRadius: '5px', marginBottom: '1rem', border: `1px solid ${effectiveBal > 0 ? '#ffc107' : '#ccc'}` }}>
-                  <p style={{ margin: 0, color: effectiveBal > 0 ? '#856404' : '#dc3545', fontWeight: 'bold', fontSize: '1.05rem' }}>
+                <div style={{ backgroundColor: effectiveBal > 0 ? '#fff3cd' : '#d1e7dd', padding: '10px', borderRadius: '5px', marginBottom: '1rem', border: `1px solid ${effectiveBal > 0 ? '#ffc107' : '#0f5132'}` }}>
+                  <p style={{ margin: 0, color: effectiveBal > 0 ? '#856404' : '#0f5132', fontWeight: 'bold', fontSize: '1.05rem' }}>
                     {effectiveBal > 0 ? '⚠️' : '✅'} Current Pending Balance: Rs. {formatCurrency(effectiveBal)}
                   </p>
+
                 </div>
               );
             })()}
