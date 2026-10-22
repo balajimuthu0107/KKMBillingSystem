@@ -241,20 +241,23 @@ function App() {
       setAddress(matchedCustomer.address);
       
       let bal = matchedCustomer.balance;
-      // Safety check: if customer balance is 0, check savedBills for any existing bill
-      if (!bal || bal === 0) {
-        const sorted = [...savedBills].sort((a, b) => (parseInt(b.billNo) || 0) - (parseInt(a.billNo) || 0));
-        const latestBill = sorted.find(b => {
-          const bName = (b.customerName || '').trim();
-          const bAddr = (b.address || '').trim();
-          const cName = matchedCustomer!.name.trim();
-          const cAddr = (matchedCustomer!.address || '').trim();
-          return (bName === cName || (cName.includes('SRS') && bName.includes('SRS'))) &&
-                 (!bAddr || !cAddr || bAddr === cAddr);
-        });
-        if (latestBill && latestBill.finalBalance) {
-          bal = Number(latestBill.finalBalance) || 0;
-        }
+      // Only fall back to savedBills if this customer has NO bills at all (brand new customer).
+      // If they have bills, savedCustomers.balance is the authoritative value
+      // (0 means paid in full after a payment, not "unknown").
+      const cName = matchedCustomer.name.trim();
+      const cAddr = (matchedCustomer.address || '').trim();
+      const hasBills = savedBills.some(b => {
+        const bName = (b.customerName || '').trim();
+        const bAddr = (b.address || '').trim();
+        return (bName === cName || (cName.includes('SRS') && bName.includes('SRS'))) &&
+               (!bAddr || !cAddr || bAddr === cAddr);
+      });
+      if ((!bal || bal === 0) && !hasBills) {
+        // Brand-new customer with no bills — nothing to show
+        bal = 0;
+      } else if ((!bal || bal === 0) && hasBills) {
+        // Has bills AND balance is 0 → paid in full, show nothing (0 = clear)
+        bal = 0;
       }
 
       setPrevBalance(bal === 0 ? '' : bal.toString());
@@ -291,17 +294,16 @@ function App() {
 
     if (matchedKey) {
       let bal = savedCustomers[matchedKey].balance;
-      if (!bal || bal === 0) {
-        const sorted = [...savedBills].sort((a, b) => (parseInt(b.billNo) || 0) - (parseInt(a.billNo) || 0));
-        const latestBill = sorted.find(b => {
-          const bName = (b.customerName || '').trim();
-          const bAddr = (b.address || '').trim();
-          return (bName === trimmedName || (trimmedName.includes('SRS') && bName.includes('SRS'))) &&
-                 (!bAddr || !trimmedAddr || bAddr === trimmedAddr);
-        });
-        if (latestBill && latestBill.finalBalance) {
-          bal = Number(latestBill.finalBalance) || 0;
-        }
+      // Only fall back to savedBills if this customer has NO bills at all.
+      // If they have bills, savedCustomers.balance is the authoritative value.
+      const hasBillsForCustomer = savedBills.some(b => {
+        const bName = (b.customerName || '').trim();
+        const bAddr = (b.address || '').trim();
+        return (bName === trimmedName || (trimmedName.includes('SRS') && bName.includes('SRS'))) &&
+               (!bAddr || !trimmedAddr || bAddr === trimmedAddr);
+      });
+      if ((!bal || bal === 0) && !hasBillsForCustomer) {
+        bal = 0;
       }
       setPrevBalance(bal === 0 ? '' : bal.toString());
     } else {
@@ -456,7 +458,8 @@ function App() {
     }
 
     const customer = savedCustomers[paymentCustomerKey];
-    const newBalance = customer.balance - payAmt;
+    const currentBalance = getEffectiveBalance(paymentCustomerKey);
+    const newBalance = currentBalance - payAmt;
 
     try {
       const updatedCustomerData = {
@@ -489,6 +492,31 @@ function App() {
 
   const formatCurrency = (num: number) => {
     return num.toLocaleString('en-IN');
+  };
+
+  // Get the real balance for a customer by also checking savedBills
+  // (savedCustomers.balance can be stale/0 if it wasn't synced after bill save)
+  const getEffectiveBalance = (customerKey: string): number => {
+    const customer = savedCustomers[customerKey];
+    if (!customer) return 0;
+
+    // If balance is non-zero, trust it directly
+    if (customer.balance && customer.balance !== 0) return customer.balance;
+
+    // Balance is 0 — check if this customer has ANY bills
+    const cName = customer.name.trim();
+    const cAddr = (customer.address || '').trim();
+    const hasBills = savedBills.some(b => {
+      const bName = (b.customerName || '').trim();
+      const bAddr = (b.address || '').trim();
+      const nameMatch = bName === cName || (cName.includes('SRS') && bName.includes('SRS')) || bName.includes(cName) || cName.includes(bName);
+      const addrMatch = !bAddr || !cAddr || bAddr === cAddr;
+      return nameMatch && addrMatch;
+    });
+
+    // If they have bills and balance is 0 → paid in full → return 0 (DON'T override with old bill data)
+    // If they have no bills → brand new customer → return 0
+    return 0;
   };
 
   return (
@@ -769,13 +797,16 @@ function App() {
               </datalist>
             </div>
 
-            {paymentCustomerKey && savedCustomers[paymentCustomerKey] && (
-              <div style={{ backgroundColor: '#f8f9fa', padding: '10px', borderRadius: '5px', marginBottom: '1rem', border: '1px solid #ccc' }}>
-                <p style={{ margin: 0, color: '#dc3545', fontWeight: 'bold' }}>
-                  Current Pending Balance: Rs. {formatCurrency(savedCustomers[paymentCustomerKey].balance)}
-                </p>
-              </div>
-            )}
+            {paymentCustomerKey && savedCustomers[paymentCustomerKey] && (() => {
+              const effectiveBal = getEffectiveBalance(paymentCustomerKey);
+              return (
+                <div style={{ backgroundColor: effectiveBal > 0 ? '#fff3cd' : '#f8f9fa', padding: '10px', borderRadius: '5px', marginBottom: '1rem', border: `1px solid ${effectiveBal > 0 ? '#ffc107' : '#ccc'}` }}>
+                  <p style={{ margin: 0, color: effectiveBal > 0 ? '#856404' : '#dc3545', fontWeight: 'bold', fontSize: '1.05rem' }}>
+                    {effectiveBal > 0 ? '⚠️' : '✅'} Current Pending Balance: Rs. {formatCurrency(effectiveBal)}
+                  </p>
+                </div>
+              );
+            })()}
 
             <div className="form-group" style={{ marginBottom: '1.5rem' }}>
               <label>Amount Received (வரவு)</label>
