@@ -26,6 +26,7 @@ export interface BillItem {
   particulars: string;
   quantity?: string | number;
   qty?: string | number;
+  kg?: string | number;
   price?: string | number;
   rate?: string | number;
   amount?: number;
@@ -480,12 +481,14 @@ export const getBills = async (): Promise<SavedBill[]> => {
         const mappedItems: BillItem[] = rawItems.map((it: any) => {
           const q = it.quantity !== undefined ? it.quantity : (it.qty !== undefined ? it.qty : '');
           const p = it.price !== undefined ? it.price : (it.rate !== undefined ? it.rate : '');
+          const kg = it.kg !== undefined ? it.kg : '';
           return {
             id: it.id || it.frontendId,
             frontendId: it.frontendId || String(it.id || ''),
             particulars: it.particulars || '',
             quantity: q,
             qty: q,
+            kg: kg,
             price: p,
             rate: p,
             amount: (Number(q) || 0) * (Number(p) || 0)
@@ -542,12 +545,14 @@ export const getBills = async (): Promise<SavedBill[]> => {
           const mappedItems: BillItem[] = (Array.isArray(b.items) ? b.items : []).map((it: any) => {
             const q = it.quantity !== undefined ? it.quantity : (it.qty !== undefined ? it.qty : '');
             const p = it.price !== undefined ? it.price : (it.rate !== undefined ? it.rate : '');
+            const kg = it.kg !== undefined ? it.kg : '';
             return {
               id: it.id || it.frontendId,
               frontendId: it.frontendId || String(it.id || ''),
               particulars: it.particulars || '',
               quantity: q,
               qty: q,
+              kg: kg,
               price: p,
               rate: p,
               amount: (Number(q) || 0) * (Number(p) || 0)
@@ -592,11 +597,13 @@ export const createBill = async (bill: SavedBill): Promise<SavedBill> => {
   const mappedItems: BillItem[] = bill.items.map(item => {
     const q = item.quantity !== undefined && item.quantity !== '' ? item.quantity : (item.qty ?? '');
     const p = item.price !== undefined && item.price !== '' ? item.price : (item.rate ?? '');
+    const kg = item.kg !== undefined ? item.kg : '';
     return {
       frontendId: item.id?.toString(),
       particulars: item.particulars,
       quantity: q,
       qty: q,
+      kg: kg,
       price: p,
       rate: p,
       amount: (Number(q) || 0) * (Number(p) || 0)

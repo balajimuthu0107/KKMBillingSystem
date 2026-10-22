@@ -62,7 +62,7 @@ function App() {
   const [searchKey, setSearchKey] = useState('');
   
   const [items, setItems] = useState<BillItem[]>(() => [
-    { id: Date.now().toString(), particulars: FISH_TYPES[0], qty: '', rate: '' }
+    { id: Date.now().toString(), particulars: FISH_TYPES[0], qty: '', rate: '', kg: '', quantity: '', price: '' }
   ]);
   
   const [prevBalance, setPrevBalance] = useState<string>('');
@@ -310,7 +310,7 @@ function App() {
   };
 
   const addItem = () => {
-    setItems([...items, { id: Date.now().toString(), particulars: FISH_TYPES[0], qty: '', rate: '', quantity: '', price: '' }]);
+    setItems([...items, { id: Date.now().toString(), particulars: FISH_TYPES[0], qty: '', rate: '', kg: '', quantity: '', price: '' }]);
   };
 
   const updateItem = (id: string | number | undefined, field: keyof BillItem, value: string) => {
@@ -331,7 +331,7 @@ function App() {
     setItems(items.filter(item => item.id !== id));
   };
 
-  const currentTotal = items.reduce((sum, item) => sum + ((Number(item.quantity ?? item.qty) || 0) * (Number(item.price ?? item.rate) || 0)), 0);
+  const currentTotal = items.reduce((sum, item) => sum + ((Number(item.kg) || 0) * (Number(item.price ?? item.rate) || 0)), 0);
   const subTotal = currentTotal + (Number(prevBalance) || 0);
   const finalBalance = subTotal - (Number(advance) || 0);
 
@@ -389,7 +389,7 @@ function App() {
       setSearchKey('');
       setPrevBalance('');
       setAdvance('');
-      setItems([{ id: Date.now().toString(), particulars: FISH_TYPES[0], qty: '', rate: '', quantity: '', price: '' }]);
+      setItems([{ id: Date.now().toString(), particulars: FISH_TYPES[0], qty: '', rate: '', kg: '', quantity: '', price: '' }]);
     } catch (err: any) {
       alert('Error saving bill: ' + err.message);
     }
@@ -434,7 +434,7 @@ function App() {
       setSearchKey('');
       setPrevBalance('');
       setAdvance('');
-      setItems([{ id: Date.now().toString(), particulars: FISH_TYPES[0], qty: '', rate: '', quantity: '', price: '' }]);
+      setItems([{ id: Date.now().toString(), particulars: FISH_TYPES[0], qty: '', rate: '', kg: '', quantity: '', price: '' }]);
     }
   };
 
@@ -638,6 +638,10 @@ function App() {
                 <input type="number" min="1" value={item.qty} onChange={e => updateItem(item.id, 'qty', e.target.value)} />
               </div>
               <div className="form-group">
+                <label>KG</label>
+                <input type="number" min="0" step="0.1" value={item.kg ?? ''} onChange={e => updateItem(item.id, 'kg', e.target.value)} placeholder="0.0" />
+              </div>
+              <div className="form-group">
                 <label>Rate (Rs)</label>
                 <input type="number" min="0" value={item.rate} onChange={e => updateItem(item.id, 'rate', e.target.value)} />
               </div>
@@ -806,7 +810,7 @@ function App() {
             </div>
             <img src={logoImg} alt="Logo Right" style={{ width: '70px', height: '70px', objectFit: 'contain', borderRadius: '50%' }} />
           </div>
-          <p><b>No.165, MURUGAN KOVIL STREET , MALAIYARASANKUPPAM, VILLUPURAM-605701</b></p>
+          <p><b>No.165, MURUGAN KOVIL STREET , MALAIYARASANKUPPAM,605701</b></p>
         </div>
 
         <div className="bill-info">
@@ -824,9 +828,9 @@ function App() {
             <tr>
               <th style={{ width: '10%' }}>SL No.</th>
               <th style={{ width: '40%' }}>Particulars</th>
-              <th style={{ width: '15%' }}>Qty<br/><small>Box</small></th>
-              <th style={{ width: '15%' }}>Rate<br/><small>Rs.</small></th>
-              <th style={{ width: '20%' }}>Amount<br/><small>Rs.</small></th>
+              <th style={{ width: '12%' }}>Qty<br/><small>Box</small></th>
+              <th style={{ width: '12%' }}>KG<br/><small>Weight</small></th>
+              <th style={{ width: '26%' }}>Amount<br/><small>Rs.</small></th>
             </tr>
           </thead>
           <tbody>
@@ -835,8 +839,8 @@ function App() {
                 <td className="text-center">{index + 1}</td>
                 <td>{item.particulars}</td>
                 <td className="text-center">{item.qty}</td>
-                <td>{formatCurrency(Number(item.rate) || 0)}</td>
-                <td className="font-bold">{formatCurrency((Number(item.qty) || 0) * (Number(item.rate) || 0))}</td>
+                <td className="text-center">{item.kg !== undefined && item.kg !== '' ? item.kg : '-'}</td>
+                <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency((Number(item.kg) || 0) * (Number(item.rate) || 0))}</td>
               </tr>
             ))}
             
@@ -860,18 +864,18 @@ function App() {
 
             {/* Final Balance Row */}
             <tr>
-              <td colSpan={3} rowSpan={3} style={{verticalAlign: 'bottom', borderRight: 'none'}}>
+              <td colSpan={2} rowSpan={3} style={{verticalAlign: 'bottom', borderRight: 'none'}}>
                 <b>Thank You!</b>
               </td>
-              <td className="font-bold">Total Amount</td>
+              <td colSpan={2} className="font-bold">Total Amount</td>
               <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(subTotal)}</td>
             </tr>
             <tr>
-              <td className="font-bold">Advance</td>
+              <td colSpan={2} className="font-bold">Advance</td>
               <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(Number(advance) || 0)}</td>
             </tr>
             <tr>
-              <td className="font-bold">Balance</td>
+              <td colSpan={2} className="font-bold">Balance</td>
               <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(finalBalance)}</td>
             </tr>
           </tbody>
