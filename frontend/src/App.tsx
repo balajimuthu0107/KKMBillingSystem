@@ -22,7 +22,7 @@ const FISH_TYPES = [
   'கெண்டை (Kendai)',
   'நண்டு (Crab)',
   'கொடுவா (Koduva)'
-  
+
 ];
 
 
@@ -38,17 +38,17 @@ function App() {
   const datePickerRef = useRef<HTMLInputElement>(null);
 
   const [billNoPreview, setBillNoPreview] = useState<{ customerId: string; billNo: string } | null>(null);
-  
+
   const [date, setDate] = useState<string>(getTodayDate);
-  
+
   const [customerName, setCustomerName] = useState('');
   const [address, setAddress] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
-  
+
   const [items, setItems] = useState<BillItem[]>(() => [
     { id: Date.now().toString(), particulars: FISH_TYPES[0], qty: '', rate: '', kg: '', quantity: '', price: '' }
   ]);
-  
+
   const [prevBalance, setPrevBalance] = useState<string>('');
   const [advance, setAdvance] = useState<string>('');
 
@@ -65,7 +65,7 @@ function App() {
           getCustomers(),
           getBills()
         ]);
-        
+
         const customerMap: Record<string, CustomerData> = {};
         if (Array.isArray(customersData)) {
           customersData.forEach(c => {
@@ -149,7 +149,7 @@ function App() {
       alert('Error removing bill: ' + err.message);
     }
   };
-  
+
 
   const billPreviewRef = useRef<HTMLDivElement>(null);
 
@@ -176,7 +176,7 @@ function App() {
     const matchedKey = Object.keys(savedCustomers).find(k => {
       const c = savedCustomers[k];
       const nameMatch = c.name.trim() === trimmedName ||
-                        (trimmedName.includes('SRS') && c.name.includes('SRS'));
+        (trimmedName.includes('SRS') && c.name.includes('SRS'));
       const addrMatch = !trimmedAddr || !c.address || c.address.trim() === trimmedAddr;
       return nameMatch && addrMatch;
     });
@@ -188,7 +188,7 @@ function App() {
         const bName = (b.customerName || '').trim();
         const bAddr = (b.address || '').trim();
         return (bName === trimmedName || (trimmedName.includes('SRS') && bName.includes('SRS'))) &&
-               (!bAddr || !trimmedAddr || bAddr === trimmedAddr);
+          (!bAddr || !trimmedAddr || bAddr === trimmedAddr);
       });
       if ((!bal || bal === 0) && !hasBillsForCustomer) {
         bal = 0;
@@ -257,7 +257,7 @@ function App() {
 
     try {
       const saved = await createBill(newBill);
-      
+
       const updatedBills = [...savedBills, saved];
       setSavedBills(updatedBills);
 
@@ -268,7 +268,7 @@ function App() {
         address: address,
         balance: saved.finalBalance
       };
-      
+
       const updatedCustomers = {
         ...savedCustomers,
         [selectedCustomerId]: updatedCustomer
@@ -276,7 +276,7 @@ function App() {
       setSavedCustomers(updatedCustomers);
 
       alert(`Bill Saved! ${customerName}'s new balance is Rs.${formatCurrency(saved.finalBalance)}`);
-      
+
 
       setDate(getTodayDate());
       setCustomerName('');
@@ -303,7 +303,7 @@ function App() {
       alert("Error: Please provide both Customer Name and Address before downloading!");
       return;
     }
-    
+
     if (billPreviewRef.current) {
       try {
         const canvas = await html2canvas(billPreviewRef.current, { scale: 2 });
@@ -378,14 +378,14 @@ function App() {
           return b;
         });
       });
-      
+
       alert(`Payment Saved! ${customer.name}'s new balance is Rs.${formatCurrency(newBalance)}`);
-      
+
 
       setShowPaymentModal(false);
       setPaymentCustomerKey('');
       setPaymentAmount('');
-    } catch(err: any) {
+    } catch (err: any) {
       alert('Error saving payment: ' + err.message);
     }
   };
@@ -441,27 +441,27 @@ function App() {
         </div>
       )}
       <div className="no-print">
-        
+
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
           <h2>🐟 KKM sea foodz</h2>
           <div>
-            <button 
-              className="btn" 
-              style={{ backgroundColor: '#17a2b8', color: '#fff', fontWeight: 'bold', marginRight: '10px' }} 
+            <button
+              className="btn"
+              style={{ backgroundColor: '#17a2b8', color: '#fff', fontWeight: 'bold', marginRight: '10px' }}
               onClick={() => setShowHistoryModal(true)}
             >
               📜 Previous Bills
             </button>
-            <button 
-              className="btn" 
-              style={{ backgroundColor: '#ffc107', color: '#000', fontWeight: 'bold' }} 
+            <button
+              className="btn"
+              style={{ backgroundColor: '#ffc107', color: '#000', fontWeight: 'bold' }}
               onClick={() => setShowPaymentModal(true)}
             >
               💰 முந்தைய இருப்பு (Receive Payment)
             </button>
           </div>
         </div>
-        
+
         <div className="card">
           <div className="form-grid">
             <div className="form-group">
@@ -471,15 +471,15 @@ function App() {
             <div className="form-group">
               <label>Date (DD-MM-YYYY)</label>
               <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <input 
-                  type="text" 
-                  value={date} 
-                  onChange={e => setDate(e.target.value)} 
+                <input
+                  type="text"
+                  value={date}
+                  onChange={e => setDate(e.target.value)}
                   placeholder="DD-MM-YYYY"
                   style={{ width: '100%', paddingRight: '42px', fontWeight: 'bold', fontSize: '1rem' }}
                 />
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   onClick={() => {
                     try {
                       datePickerRef.current?.showPicker?.();
@@ -500,8 +500,8 @@ function App() {
                 >
                   📅
                 </button>
-                <input 
-                  type="date" 
+                <input
+                  type="date"
                   ref={datePickerRef}
                   value={formatDateToYMD(date)}
                   onChange={e => {
@@ -514,7 +514,7 @@ function App() {
                 />
               </div>
             </div>
-            
+
             <div className="form-group" style={{ gridColumn: '1 / -1' }}>
               <label style={{ color: '#0b4b8a', fontWeight: 'bold' }}>🔎 Select Customer from List (Choose One)</label>
               <select
@@ -523,9 +523,20 @@ function App() {
                 style={{ backgroundColor: '#e9ecef', border: '2px solid #0b4b8a' }}
               >
                 <option value="">Select a customer...</option>
-                {Object.entries(savedCustomers).map(([id, customer]) => (
-                  <option key={id} value={id}>{customer.name} - {customer.address}</option>
-                ))}
+                {(() => {
+                  const seenNames = new Set<string>();
+                  return Object.entries(savedCustomers)
+                    .sort(([, a], [, b]) => a.name.localeCompare(b.name))
+                    .filter(([, customer]) => {
+                      const key = customer.name.trim().toLowerCase();
+                      if (seenNames.has(key)) return false;
+                      seenNames.add(key);
+                      return true;
+                    })
+                    .map(([id, customer]) => (
+                      <option key={id} value={id}>{customer.name} - {customer.address}</option>
+                    ));
+                })()}
               </select>
               {((Number(prevBalance) || 0) > 0 || (selectedCustomer && selectedCustomer.balance !== 0)) && (
                 <div style={{ marginTop: '10px', color: '#842029', fontWeight: 'bold', fontSize: '1.1em', padding: '10px', backgroundColor: '#f8d7da', border: '1px solid #f5c2c7', borderRadius: '5px' }}>
@@ -536,18 +547,18 @@ function App() {
 
             <div className="form-group">
               <label>Name (For Bill)</label>
-              <input 
-                type="text" 
-                value={customerName} 
-                onChange={e => handleManualEdit(e.target.value, address)} 
+              <input
+                type="text"
+                value={customerName}
+                onChange={e => handleManualEdit(e.target.value, address)}
               />
             </div>
             <div className="form-group">
               <label>Address (For Bill)</label>
-              <input 
-                type="text" 
-                value={address} 
-                onChange={e => handleManualEdit(customerName, e.target.value)} 
+              <input
+                type="text"
+                value={address}
+                onChange={e => handleManualEdit(customerName, e.target.value)}
               />
             </div>
           </div>
@@ -562,11 +573,11 @@ function App() {
             <div className="item-row" key={item.id}>
               <div className="form-group">
                 <label>Fish Type</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   list="fish-list"
-                  value={item.particulars} 
-                  onChange={e => updateItem(item.id, 'particulars', e.target.value)} 
+                  value={item.particulars}
+                  onChange={e => updateItem(item.id, 'particulars', e.target.value)}
                 />
                 <datalist id="fish-list">
                   {FISH_TYPES.map(fish => <option key={fish} value={fish} />)}
@@ -620,7 +631,7 @@ function App() {
               <h2 style={{ margin: 0, color: '#0b4b8a', borderBottom: 'none' }}>📜 Previous Bills History</h2>
               <button className="btn btn-danger" onClick={() => setShowHistoryModal(false)}>Close</button>
             </div>
-            
+
             {savedBills.length === 0 ? (
               <p>No bills saved yet.</p>
             ) : (
@@ -652,17 +663,17 @@ function App() {
                       <td style={{ padding: '8px', border: '1px solid #ccc' }} className="text-right font-bold">{formatCurrency(bill.finalBalance)}</td>
                       <td style={{ padding: '8px', border: '1px solid #ccc', whiteSpace: 'nowrap' }} className="text-center">
                         <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
-                          <button 
-                            className="btn btn-primary" 
-                            style={{ padding: '4px 10px', fontSize: '12px' }} 
+                          <button
+                            className="btn btn-primary"
+                            style={{ padding: '4px 10px', fontSize: '12px' }}
                             onClick={() => loadBill(bill)}
                             title="View and Edit Bill"
                           >
                             👁️ View
                           </button>
-                          <button 
-                            className="btn btn-danger" 
-                            style={{ padding: '4px 10px', fontSize: '12px', backgroundColor: '#dc3545', color: '#fff' }} 
+                          <button
+                            className="btn btn-danger"
+                            style={{ padding: '4px 10px', fontSize: '12px', backgroundColor: '#dc3545', color: '#fff' }}
                             onClick={() => handleDeleteBill(bill)}
                             title="Remove Bill"
                           >
@@ -687,14 +698,25 @@ function App() {
         }}>
           <div className="card no-print" style={{ width: '90%', maxWidth: '400px', backgroundColor: '#fff', border: '2px solid #0b4b8a' }}>
             <h2 style={{ marginBottom: '1rem', color: '#0b4b8a' }}>💰 முந்தைய இருப்பு (Receive Payment)</h2>
-            
+
             <div className="form-group" style={{ marginBottom: '1rem' }}>
               <label>Select Customer</label>
               <select value={paymentCustomerKey} onChange={e => setPaymentCustomerKey(e.target.value)}>
                 <option value="">Select a customer...</option>
-                {Object.entries(savedCustomers).map(([id, customer]) => (
-                  <option key={id} value={id}>{customer.name} - {customer.address}</option>
-                ))}
+                {(() => {
+                  const seenNames2 = new Set<string>();
+                  return Object.entries(savedCustomers)
+                    .sort(([, a], [, b]) => a.name.localeCompare(b.name))
+                    .filter(([, customer]) => {
+                      const key = customer.name.trim().toLowerCase();
+                      if (seenNames2.has(key)) return false;
+                      seenNames2.add(key);
+                      return true;
+                    })
+                    .map(([id, customer]) => (
+                      <option key={id} value={id}>{customer.name} - {customer.address}</option>
+                    ));
+                })()}
               </select>
             </div>
 
@@ -714,10 +736,10 @@ function App() {
 
             <div className="form-group" style={{ marginBottom: '1.5rem' }}>
               <label>Amount Received (வரவு)</label>
-              <input 
-                type="number" 
-                value={paymentAmount} 
-                onChange={e => setPaymentAmount(e.target.value)} 
+              <input
+                type="number"
+                value={paymentAmount}
+                onChange={e => setPaymentAmount(e.target.value)}
                 placeholder="Enter amount..."
               />
             </div>
@@ -739,7 +761,7 @@ function App() {
             <span style={{ display: 'inline-block', lineHeight: '1.6', textAlign: 'left' }}>
               <span style={{ display: 'flex', gap: '4px' }}>
                 <span style={{ whiteSpace: 'nowrap' }}>Mobile:</span>
-                  9787178910<br/>8695172090
+                9787178910<br />8695172090
               </span>
             </span>
           </div>
@@ -769,9 +791,9 @@ function App() {
             <tr>
               <th style={{ width: '8%' }}>SL No.</th>
               <th style={{ width: '40%' }}>Particulars</th>
-              <th style={{ width: '12%' }}>Qty<br/><small>Box</small></th>
-              <th style={{ width: '18%' }}>Rate<br/><small>Rs.</small></th>
-              <th style={{ width: '22%' }}>Amount<br/><small>Rs.</small></th>
+              <th style={{ width: '12%' }}>Qty<br /><small>Box</small></th>
+              <th style={{ width: '18%' }}>Rate<br /><small>Rs.</small></th>
+              <th style={{ width: '22%' }}>Amount<br /><small>Rs.</small></th>
             </tr>
           </thead>
           <tbody>
@@ -786,10 +808,10 @@ function App() {
                 </td>
               </tr>
             ))}
-            
+
             {/* Previous Balance Row */}
             <tr>
-              <td colSpan={4} className="text-right font-bold" style={{color: 'blue'}}>முன் பாக்கி =&gt;</td>
+              <td colSpan={4} className="text-right font-bold" style={{ color: 'blue' }}>முன் பாக்கி =&gt;</td>
               <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(Number(prevBalance) || 0)}</td>
             </tr>
 
@@ -801,13 +823,13 @@ function App() {
 
             {/* Advance Row */}
             <tr>
-              <td colSpan={4} className="text-right font-bold" style={{color: 'blue'}}>Advance (வரவு) =&gt;</td>
+              <td colSpan={4} className="text-right font-bold" style={{ color: 'blue' }}>Advance (வரவு) =&gt;</td>
               <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(Number(advance) || 0)}</td>
             </tr>
 
             {/* Final Balance Row */}
             <tr>
-              <td colSpan={1} rowSpan={3} style={{verticalAlign: 'bottom', borderRight: 'none'}}>
+              <td colSpan={1} rowSpan={3} style={{ verticalAlign: 'bottom', borderRight: 'none' }}>
                 <b>Thank You!</b>
               </td>
               <td colSpan={3} className="font-bold">Total Amount</td>
