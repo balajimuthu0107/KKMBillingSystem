@@ -8,7 +8,8 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "build": "tsc",
-    "seed": "tsx src/seed.ts"
+    "seed": "tsx src/seed.ts",
+    "migrate:bill-numbers": "tsx src/migrateBillNumbers.ts"
   },
   "keywords": ["billing", "firebase", "express", "nodejs", "firestore"],
   "author": "",

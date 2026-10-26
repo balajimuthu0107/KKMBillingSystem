@@ -1,0 +1,43 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function customerCounterPath(customerId) {
+      return /databases/$(database)/documents/customers/$(customerId);
+    }
+
+    function lastBillNoIsUnchangedOrIncrementedOnce() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastBillNo'])
+        || (
+          resource.data.lastBillNo is int
+          && request.resource.data.lastBillNo is int
+          && request.resource.data.lastBillNo == resource.data.lastBillNo + 1
+        );
+    }
+
+    function billNumberMatchesCustomerCounter() {
+      let customerPath = customerCounterPath(request.resource.data.customerId);
+      return request.resource.data.customerId is string
+        && request.resource.data.billNo is int
+        && exists(customerPath)
+        && get(customerPath).data.lastBillNo is int
+        && get(customerPath).data.lastBillNo + 1 == request.resource.data.billNo
+        && getAfter(customerPath).data.lastBillNo == request.resource.data.billNo;
+    }
+
+    match /customers/{customerId} {
+      allow read: if true;
+      allow create: if request.resource.data.lastBillNo == 0;
+      allow update: if lastBillNoIsUnchangedOrIncrementedOnce();
+      allow delete: if false;
+    }
+
+    match /bills/{billId} {
+      allow read: if true;
+      allow create: if billNumberMatchesCustomerCounter();
+      allow update: if request.resource.data.customerId == resource.data.customerId
+        && request.resource.data.billNo == resource.data.billNo;
+      allow delete: if true;
+    }
+  }
+}

@@ -17,6 +17,7 @@ async function seed() {
       const docRef = db.collection('customers').doc();
       batch.set(docRef, {
         ...customer,
+        lastBillNo: 0,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });

@@ -6,6 +6,7 @@ export interface CustomerData {
   name: string;
   address: string;
   balance: number;
+  lastBillNo?: number;
   updatedAt?: string;
 }
 
@@ -49,6 +50,7 @@ router.get('/', async (_req: Request, res: Response) => {
             name: c.name,
             address: c.address,
             balance: c.balance,
+            lastBillNo: 0,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
           };
@@ -67,6 +69,7 @@ router.get('/', async (_req: Request, res: Response) => {
           name: data.name || '',
           address: data.address || '',
           balance: Number(data.balance) || 0,
+          lastBillNo: Number(data.lastBillNo) || 0,
           updatedAt: data.updatedAt
         });
       });
@@ -107,6 +110,7 @@ router.post('/', async (req: Request, res: Response) => {
           name: name.trim(),
           address: address.trim(),
           balance: cleanBalance,
+          lastBillNo: Number(existingDoc.data().lastBillNo) || 0,
           updatedAt: now
         };
         await existingDoc.ref.update(updatedData);
@@ -117,6 +121,7 @@ router.post('/', async (req: Request, res: Response) => {
         name: name.trim(),
         address: address.trim(),
         balance: cleanBalance,
+        lastBillNo: 0,
         createdAt: now,
         updatedAt: now
       });
@@ -126,6 +131,7 @@ router.post('/', async (req: Request, res: Response) => {
         name: name.trim(),
         address: address.trim(),
         balance: cleanBalance,
+        lastBillNo: 0,
         updatedAt: now
       });
     }
@@ -200,6 +206,7 @@ router.put('/:id', async (req: Request, res: Response) => {
           name: name || '',
           address: address || '',
           balance: Number(balance) || 0,
+          lastBillNo: 0,
           createdAt: now,
           updatedAt: now
         });
@@ -264,6 +271,7 @@ router.post('/seed', async (_req: Request, res: Response) => {
           name: c.name,
           address: c.address,
           balance: c.balance,
+          lastBillNo: 0,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };

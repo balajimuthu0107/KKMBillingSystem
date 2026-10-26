@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { Timestamp } from 'firebase-admin/firestore';
 import { getDb, isFirebaseConnected } from '../firebase.js';
 
 export interface BillItem {
@@ -14,6 +15,7 @@ export interface BillItem {
 
 export interface SavedBill {
   id?: string | number;
+  customerId: string;
   billNo: string;
   date: string;
   customerName: string;
@@ -47,6 +49,18 @@ export const formatDateToDMY = (dateStr: string): string => {
     return `${dd}-${mm}-${yyyy}`;
   }
   return trimmed;
+};
+
+const parseBillDate = (dateStr: string): Date => {
+  const normalized = formatDateToDMY(dateStr);
+  const match = /^(\d{2})-(\d{2})-(\d{4})$/.exec(normalized);
+  if (!match) throw new Error(`Invalid bill date: ${dateStr}`);
+  const [, day, month, year] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (date.getUTCFullYear() !== Number(year) || date.getUTCMonth() !== Number(month) - 1 || date.getUTCDate() !== Number(day)) {
+    throw new Error(`Invalid bill date: ${dateStr}`);
+  }
+  return date;
 };
 
 // Fallback in-memory storage for bills
@@ -83,8 +97,11 @@ router.get('/', async (_req: Request, res: Response) => {
 
         bills.push({
           id: doc.id,
+          customerId: String(data.customerId || ''),
           billNo: String(data.billNo || ''),
-          date: formatDateToDMY(String(data.date || '')),
+          date: data.date && typeof data.date.toDate === 'function'
+            ? formatDateToDMY(data.date.toDate().toISOString().slice(0, 10))
+            : formatDateToDMY(String(data.date || '')),
           customerName: String(data.customerName || ''),
           address: String(data.address || ''),
           items: mappedItems,
@@ -96,16 +113,17 @@ router.get('/', async (_req: Request, res: Response) => {
           receipt: adv,
           totalAmount: Number(data.totalAmount) || 0,
           finalBalance: Number(data.finalBalance) || 0,
-          createdAt: data.createdAt
+          createdAt: data.createdAt && typeof data.createdAt.toDate === 'function'
+            ? data.createdAt.toDate().toISOString()
+            : data.createdAt
         });
       });
 
-      // Sort descending by billNo (highest/newest first)
       bills.sort((a, b) => {
-        const numA = parseInt(a.billNo) || 0;
-        const numB = parseInt(b.billNo) || 0;
-        if (numB !== numA) return numB - numA;
-        return (b.createdAt || '').localeCompare(a.createdAt || '');
+        const customerCompare = `${a.customerName} - ${a.address}`.localeCompare(`${b.customerName} - ${b.address}`);
+        return customerCompare
+          || a.customerId.localeCompare(b.customerId)
+          || (Number(a.billNo) || 0) - (Number(b.billNo) || 0);
       });
 
       return res.json(bills);
@@ -152,7 +170,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.post('/', async (req: Request, res: Response) => {
   try {
     const {
-      billNo,
+      customerId,
       date,
       customerName,
       address = '',
@@ -163,12 +181,11 @@ router.post('/', async (req: Request, res: Response) => {
       prevBalance,
       advance,
       receipt,
-      totalAmount = 0,
-      finalBalance = 0
+      totalAmount = 0
     } = req.body;
 
-    if (!customerName || !billNo) {
-      return res.status(400).json({ error: 'Customer name and Bill number are required' });
+    if (!customerId || !customerName) {
+      return res.status(400).json({ error: 'Customer document ID and customer name are required' });
     }
 
     const now = new Date().toISOString();
@@ -198,10 +215,13 @@ router.post('/', async (req: Request, res: Response) => {
 
     const finalAdv = advance !== undefined && advance !== '' ? advance : (receipt ?? '');
     const finalPrevBal = previousBalance !== undefined && previousBalance !== '' ? previousBalance : (prevBalance ?? '');
+    const numericTotal = Number(totalAmount) || 0;
+    const numericAdvance = Number(finalAdv) || 0;
+    const billFinalBalance = numericTotal - numericAdvance;
 
-    // Ordered schema: 1.billNo, 2.date, 3.customerName, 4.address, 5.quantity, 6.price, 7.previousBalance, 8.advance, 9.totalAmount
     const cleanBill: SavedBill = {
-      billNo: String(billNo),
+      customerId: String(customerId),
+      billNo: '',
       date: formatDateToDMY(String(date)),
       customerName: String(customerName).trim(),
       address: String(address).trim(),
@@ -210,56 +230,48 @@ router.post('/', async (req: Request, res: Response) => {
       items: mappedItems,
       previousBalance: String(finalPrevBal),
       prevBalance: String(finalPrevBal),
-      advance: String(finalAdv),
-      receipt: String(finalAdv),
-      totalAmount: Number(totalAmount) || 0,
-      finalBalance: Number(finalBalance) || 0,
+      advance: numericAdvance,
+      receipt: numericAdvance,
+      totalAmount: numericTotal,
+      finalBalance: billFinalBalance,
       createdAt: now
     };
 
     const db = getDb();
     if (isFirebaseConnected() && db) {
-      // 1. Save bill in Firestore
-      const docRef = await db.collection('bills').add(cleanBill);
-      const savedBillResult = { id: docRef.id, ...cleanBill };
+      const customerRef = db.collection('customers').doc(String(customerId));
+      const billRef = db.collection('bills').doc();
+      let assignedBillNo = 0;
 
-      // 2. Automatically sync customer balance in Firestore
-      try {
-        const custSnap = await db.collection('customers')
-          .where('name', '==', cleanBill.customerName)
-          .where('address', '==', cleanBill.address)
-          .limit(1)
-          .get();
-
-        if (!custSnap.empty) {
-          const custDoc = custSnap.docs[0];
-          await custDoc.ref.update({
-            balance: cleanBill.finalBalance,
-            updatedAt: now
-          });
-        } else {
-          await db.collection('customers').add({
-            name: cleanBill.customerName,
-            address: cleanBill.address,
-            balance: cleanBill.finalBalance,
-            createdAt: now,
-            updatedAt: now
-          });
+      await db.runTransaction(async transaction => {
+        const customerSnapshot = await transaction.get(customerRef);
+        if (!customerSnapshot.exists) throw new Error('The selected customer does not exist.');
+        const lastBillNo = customerSnapshot.data()?.lastBillNo;
+        if (!Number.isInteger(lastBillNo) || lastBillNo < 0) {
+          throw new Error('The customer has an invalid lastBillNo. Run the bill-number migration first.');
         }
-      } catch (custErr: any) {
-        console.warn('[Firebase] Warning: Failed to sync customer balance:', custErr.message);
-      }
+        assignedBillNo = lastBillNo + 1;
+        transaction.update(customerRef, {
+          lastBillNo: assignedBillNo,
+          balance: billFinalBalance,
+          updatedAt: now
+        });
+        transaction.create(billRef, {
+          ...cleanBill,
+          billNo: assignedBillNo,
+          date: Timestamp.fromDate(parseBillDate(String(date))),
+          createdAt: Timestamp.now()
+        });
+      });
 
-      return res.status(201).json(savedBillResult);
+      return res.status(201).json({
+        id: billRef.id,
+        ...cleanBill,
+        billNo: String(assignedBillNo)
+      });
     }
 
-    // Fallback mode
-    const localSaved = {
-      id: Date.now(),
-      ...cleanBill
-    };
-    memoryBills.unshift(localSaved);
-    return res.status(201).json(localSaved);
+    return res.status(503).json({ error: 'Firestore is required to generate a unique bill number.' });
   } catch (err: any) {
     console.error('Error in POST /api/bills:', err);
     return res.status(500).json({ error: err.message });

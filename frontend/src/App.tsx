@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import html2canvas from 'html2canvas';
 import logoImg from './assets/seafoodz.jpeg';
-import { getCustomers, getBills, createBill, updateCustomer, deleteBill, formatDisplayDate, formatDateToDMY, formatDateToYMD } from './api';
+import { getCustomers, getBills, getNextBillNo, createBill, updateCustomer, deleteBill, formatDisplayDate, formatDateToDMY, formatDateToYMD } from './api';
 import type { CustomerData, SavedBill, BillItem } from './api';
 
 
@@ -26,21 +26,6 @@ const FISH_TYPES = [
 ];
 
 
-const INITIAL_CUSTOMERS: Record<string, CustomerData> = {
-  "பச்சையப்பன் - கந்தம்பாளையம்": { name: "பச்சையப்பன்", address: "கந்தம்பாளையம்", balance: 0 },
-  "முருகன் - வேட்டவலம்": { name: "முருகன்", address: "வேட்டவலம்", balance: 0 },
-  "ஹரிதாஸ் - வேட்டவலம்": { name: "ஹரிதாஸ்", address: "வேட்டவலம்", balance: 0 },
-  "முரளி - வேட்டவலம்": { name: "முரளி", address: "வேட்டவலம்", balance: 0 },
-  "பெருமாள் - கண்டாச்சிபுரம்": { name: "பெருமாள்", address: "கண்டாச்சிபுரம்", balance: 0 },
-  "கோபி - கண்டாச்சிபுரம்": { name: "கோபி", address: "கண்டாச்சிபுரம்", balance: 0 },
-  "முரளி - கண்டாச்சிபுரம்": { name: "முரளி", address: "கண்டாச்சிபுரம்", balance: 0 },
-  "ராஜா - கண்டாச்சிபுரம்": { name: "ராஜா", address: "கண்டாச்சிபுரம்", balance: 0 },
-  "ஏழுமலை - கண்டாச்சிபுரம்": { name: "ஏழுமலை", address: "கண்டாச்சிபுரம்", balance: 0 },
-  "சுரேஷ் - உளுந்தூர்பேட்டை": { name: "சுரேஷ்", address: "உளுந்தூர்பேட்டை", balance: 0 },
-  "விஜி - விருத்தாச்சலம்": { name: "விஜி", address: "விருத்தாச்சலம்", balance: 0 },
-  "SRS சிவராஜ் - விழுப்புரம்": { name: "SRS", address: "விழுப்புரம்", balance: 0 }
-};
-
 function App() {
   const getTodayDate = () => {
     const today = new Date();
@@ -52,13 +37,13 @@ function App() {
 
   const datePickerRef = useRef<HTMLInputElement>(null);
 
-  const [billNo, setBillNo] = useState<string>('101');
+  const [billNoPreview, setBillNoPreview] = useState<{ customerId: string; billNo: string } | null>(null);
   
   const [date, setDate] = useState<string>(getTodayDate);
   
   const [customerName, setCustomerName] = useState('');
   const [address, setAddress] = useState('');
-  const [searchKey, setSearchKey] = useState('');
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
   
   const [items, setItems] = useState<BillItem[]>(() => [
     { id: Date.now().toString(), particulars: FISH_TYPES[0], qty: '', rate: '', kg: '', quantity: '', price: '' }
@@ -67,7 +52,7 @@ function App() {
   const [prevBalance, setPrevBalance] = useState<string>('');
   const [advance, setAdvance] = useState<string>('');
 
-  const [savedCustomers, setSavedCustomers] = useState<Record<string, CustomerData>>(INITIAL_CUSTOMERS);
+  const [savedCustomers, setSavedCustomers] = useState<Record<string, CustomerData>>({});
   const [savedBills, setSavedBills] = useState<SavedBill[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -81,71 +66,27 @@ function App() {
           getBills()
         ]);
         
-        const customerMap: Record<string, CustomerData> = { ...INITIAL_CUSTOMERS };
+        const customerMap: Record<string, CustomerData> = {};
         if (Array.isArray(customersData)) {
           customersData.forEach(c => {
-            if (c && c.name) {
-              const key = `${c.name} - ${c.address || ''}`;
-              if (!customerMap[key] || c.balance !== 0 || customerMap[key].balance === 0) {
-                customerMap[key] = {
-                  ...customerMap[key],
-                  ...c,
-                  balance: c.balance !== 0 ? c.balance : (customerMap[key]?.balance || 0)
-                };
-              }
+            if (c && c.name && c.id !== undefined) {
+              customerMap[String(c.id)] = { ...c };
             }
           });
         }
 
-
         if (Array.isArray(billsData) && billsData.length > 0) {
-          const sortedBills = [...billsData].sort((a, b) => (parseInt(a.billNo) || 0) - (parseInt(b.billNo) || 0));
+          const sortedBills = [...billsData].sort((a, b) => (Number(a.billNo) || 0) - (Number(b.billNo) || 0));
           sortedBills.forEach(b => {
-            const bName = (b.customerName || '').trim();
-            const bAddr = (b.address || '').trim();
-            if (!bName) return;
-
-            const billBal = Number(b.finalBalance);
-            if (isNaN(billBal)) return;
-
-            const standardKey = `${bName} - ${bAddr}`;
-            let matchedKey = customerMap[standardKey] ? standardKey : null;
-            if (!matchedKey) {
-              matchedKey = Object.keys(customerMap).find(k => {
-                const c = customerMap[k];
-                return (c.name.trim() === bName || (bName === 'SRS' && c.name.includes('SRS'))) &&
-                       (!bAddr || !c.address || c.address.trim() === bAddr);
-              }) || null;
-            }
-
-            if (matchedKey) {
-              customerMap[matchedKey].balance = billBal;
-            } else {
-              customerMap[standardKey] = {
-                name: bName,
-                address: bAddr,
-                balance: billBal
-              };
+            const customer = b.customerId ? customerMap[b.customerId] : undefined;
+            if (customer) {
+              customer.balance = Number(b.finalBalance) || 0;
             }
           });
-
-
-          const srsBal = customerMap["SRS - விழுப்புரம்"]?.balance || customerMap["SRS சிவராஜ் - விழுப்புரம்"]?.balance;
-          if (srsBal !== undefined) {
-            if (customerMap["SRS - விழுப்புரம்"]) customerMap["SRS - விழுப்புரம்"].balance = srsBal;
-            if (customerMap["SRS சிவராஜ் - விழுப்புரம்"]) customerMap["SRS சிவராஜ் - விழுப்புரம்"].balance = srsBal;
-          }
         }
 
         setSavedCustomers(customerMap);
         setSavedBills(Array.isArray(billsData) ? billsData : []);
-        
-        if (Array.isArray(billsData) && billsData.length > 0) {
-          const maxBill = Math.max(...billsData.map(b => parseInt(b.billNo) || 0));
-          if (maxBill > 0) {
-            setBillNo((maxBill + 1).toString());
-          }
-        }
       } catch (err: any) {
         console.warn('Initial data load warning:', err);
       } finally {
@@ -155,6 +96,24 @@ function App() {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    if (!selectedCustomerId) return;
+    let cancelled = false;
+    getNextBillNo(selectedCustomerId)
+      .then(nextNo => {
+        if (!cancelled) setBillNoPreview({ customerId: selectedCustomerId, billNo: String(nextNo) });
+      })
+      .catch(err => {
+        if (!cancelled) {
+          setBillNoPreview(null);
+          setError(`Could not load the next bill number: ${err.message}`);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCustomerId]);
+
   const [showHistoryModal, setShowHistoryModal] = useState(false);
 
 
@@ -163,11 +122,10 @@ function App() {
   const [paymentAmount, setPaymentAmount] = useState<string>('');
 
   const loadBill = (bill: SavedBill) => {
-    setBillNo(bill.billNo);
     setDate(formatDateToDMY(bill.date));
     setCustomerName(bill.customerName);
     setAddress(bill.address);
-    setSearchKey(`${bill.customerName} - ${bill.address}`);
+    setSelectedCustomerId(bill.customerId || '');
     setItems(bill.items.map(it => ({
       ...it,
       qty: it.quantity !== undefined ? it.quantity : (it.qty !== undefined ? it.qty : ''),
@@ -195,89 +153,23 @@ function App() {
 
   const billPreviewRef = useRef<HTMLDivElement>(null);
 
-  const handleSearchChange = (key: string) => {
-    setSearchKey(key);
-    
-    const trimmedKey = key.trim();
-
-    let matchedCustomer: CustomerData | undefined = savedCustomers[key] || savedCustomers[trimmedKey];
-
-
-    if (!matchedCustomer) {
-      const lower = trimmedKey.toLowerCase();
-      const k = Object.keys(savedCustomers).find(cKey => cKey.trim().toLowerCase() === lower);
-      if (k) matchedCustomer = savedCustomers[k];
-    }
-
-
-    if (!matchedCustomer && trimmedKey.includes('-')) {
-      const parts = trimmedKey.split('-').map(s => s.trim());
-      const namePart = parts[0];
-      const addrPart = parts[1] || '';
-      const k = Object.keys(savedCustomers).find(cKey => {
-        const c = savedCustomers[cKey];
-        const nameMatch = c.name.trim() === namePart || 
-                          (namePart.includes('SRS') && c.name.includes('SRS')) ||
-                          c.name.includes(namePart);
-        const addrMatch = !addrPart || !c.address || c.address.trim() === addrPart;
-        return nameMatch && addrMatch;
-      });
-      if (k) matchedCustomer = savedCustomers[k];
-    }
-
-
-    if (!matchedCustomer) {
-      const k = Object.keys(savedCustomers).find(cKey => {
-        const c = savedCustomers[cKey];
-        return c.name.trim() === trimmedKey || 
-               (trimmedKey.includes('SRS') && c.name.includes('SRS'));
-      });
-      if (k) matchedCustomer = savedCustomers[k];
-    }
-
-    if (matchedCustomer) {
-      setCustomerName(matchedCustomer.name);
-      setAddress(matchedCustomer.address);
-      
-      let bal = matchedCustomer.balance;
-
-      const cName = matchedCustomer.name.trim();
-      const cAddr = (matchedCustomer.address || '').trim();
-      const hasBills = savedBills.some(b => {
-        const bName = (b.customerName || '').trim();
-        const bAddr = (b.address || '').trim();
-        return (bName === cName || (cName.includes('SRS') && bName.includes('SRS'))) &&
-               (!bAddr || !cAddr || bAddr === cAddr);
-      });
-      if ((!bal || bal === 0) && !hasBills) {
-
-        bal = 0;
-      } else if ((!bal || bal === 0) && hasBills) {
-
-        bal = 0;
-      }
-
-      setPrevBalance(bal === 0 ? '' : bal.toString());
-    } else {
-
-      if (key.includes('-')) {
-        const parts = key.split('-');
-        setCustomerName(parts[0].trim());
-        setAddress(parts[1].trim());
-      } else {
-        setCustomerName(key);
-        setAddress('');
-      }
+  const handleCustomerSelect = (customerId: string) => {
+    setSelectedCustomerId(customerId);
+    const customer = savedCustomers[customerId];
+    if (!customer) {
+      setCustomerName('');
+      setAddress('');
       setPrevBalance('');
+      return;
     }
+    setCustomerName(customer.name);
+    setAddress(customer.address || '');
+    setPrevBalance(customer.balance === 0 ? '' : String(customer.balance));
   };
 
   const handleManualEdit = (newName: string, newAddress: string) => {
     setCustomerName(newName);
     setAddress(newAddress);
-    const combined = `${newName} - ${newAddress}`;
-    setSearchKey(combined);
-
     const trimmedName = newName.trim();
     const trimmedAddr = newAddress.trim();
 
@@ -339,14 +231,13 @@ function App() {
   const finalBalance = subTotal - (Number(advance) || 0);
 
   const handleSaveBill = async () => {
-    if (!customerName.trim() || !address.trim()) {
-      alert("Error: Please provide both Customer Name and Address before saving!");
+    if (!selectedCustomerId || !customerName.trim() || !address.trim()) {
+      alert("Error: Please select a customer and provide both Customer Name and Address before saving!");
       return;
     }
 
-    const uniqueKey = `${customerName} - ${address}`;
-
     const newBill: SavedBill = {
+      customerId: selectedCustomerId,
       billNo,
       date: formatDateToDMY(date),
       customerName,
@@ -371,25 +262,26 @@ function App() {
       setSavedBills(updatedBills);
 
       const updatedCustomer = {
+        ...savedCustomers[selectedCustomerId],
+        id: selectedCustomerId,
         name: customerName,
         address: address,
-        balance: finalBalance
+        balance: saved.finalBalance
       };
       
       const updatedCustomers = {
         ...savedCustomers,
-        [uniqueKey]: updatedCustomer
+        [selectedCustomerId]: updatedCustomer
       };
       setSavedCustomers(updatedCustomers);
 
-      alert(`Bill Saved! ${customerName}'s new balance is Rs.${formatCurrency(finalBalance)}`);
+      alert(`Bill Saved! ${customerName}'s new balance is Rs.${formatCurrency(saved.finalBalance)}`);
       
 
-      setBillNo((parseInt(billNo) + 1).toString());
       setDate(getTodayDate());
       setCustomerName('');
       setAddress('');
-      setSearchKey('');
+      setSelectedCustomerId('');
       setPrevBalance('');
       setAdvance('');
       setItems([{ id: Date.now().toString(), particulars: FISH_TYPES[0], qty: '', rate: '', kg: '', quantity: '', price: '' }]);
@@ -429,12 +321,10 @@ function App() {
 
   const handleRefreshBill = () => {
     if (window.confirm("Are you sure you want to refresh and clear the current bill?")) {
-      const maxBill = savedBills.length > 0 ? Math.max(...savedBills.map(b => parseInt(b.billNo) || 0)) : 100;
-      setBillNo((maxBill + 1).toString());
       setDate(getTodayDate());
       setCustomerName('');
       setAddress('');
-      setSearchKey('');
+      setSelectedCustomerId('');
       setPrevBalance('');
       setAdvance('');
       setItems([{ id: Date.now().toString(), particulars: FISH_TYPES[0], qty: '', rate: '', kg: '', quantity: '', price: '' }]);
@@ -478,21 +368,13 @@ function App() {
       setSavedCustomers(updatedCustomers);
 
 
-      const cName = customer.name.trim();
-      const cAddr = (customer.address || '').trim();
       setSavedBills(prev => {
-        const customerBills = prev.filter(b => {
-          const bName = (b.customerName || '').trim();
-          const bAddr = (b.address || '').trim();
-          const nameMatch = bName === cName || (cName.includes('SRS') && bName.includes('SRS'));
-          const addrMatch = !bAddr || !cAddr || bAddr === cAddr;
-          return nameMatch && addrMatch;
-        });
+        const customerBills = prev.filter(b => b.customerId === resolvedKey);
         if (customerBills.length === 0) return prev;
-        const sorted = [...customerBills].sort((a, b) => (parseInt(b.billNo) || 0) - (parseInt(a.billNo) || 0));
+        const sorted = [...customerBills].sort((a, b) => (Number(b.billNo) || 0) - (Number(a.billNo) || 0));
         const latestBillNo = sorted[0].billNo;
         return prev.map(b => {
-          if (b.billNo === latestBillNo) return { ...b, finalBalance: newBalance };
+          if (b.customerId === resolvedKey && b.billNo === latestBillNo) return { ...b, finalBalance: newBalance };
           return b;
         });
       });
@@ -515,34 +397,7 @@ function App() {
 
   const resolveCustomerKey = (inputKey: string): string | null => {
     if (!inputKey) return null;
-    const trimmed = inputKey.trim();
-
-    if (savedCustomers[trimmed]) return trimmed;
-
-    const lower = trimmed.toLowerCase();
-    const exactCI = Object.keys(savedCustomers).find(k => k.trim().toLowerCase() === lower);
-    if (exactCI) return exactCI;
-
-    if (trimmed.includes('-')) {
-      const parts = trimmed.split('-').map(s => s.trim());
-      const namePart = parts[0];
-      const addrPart = parts.slice(1).join('-').trim();
-      const k = Object.keys(savedCustomers).find(cKey => {
-        const c = savedCustomers[cKey];
-        const nameMatch = c.name.trim() === namePart ||
-                          (namePart.includes('SRS') && c.name.includes('SRS')) ||
-                          c.name.includes(namePart);
-        const addrMatch = !addrPart || !c.address || c.address.trim() === addrPart;
-        return nameMatch && addrMatch;
-      });
-      if (k) return k;
-    }
-
-    const nameOnly = Object.keys(savedCustomers).find(cKey => {
-      const c = savedCustomers[cKey];
-      return c.name.trim() === trimmed || (trimmed.includes('SRS') && c.name.includes('SRS'));
-    });
-    return nameOnly || null;
+    return savedCustomers[inputKey] ? inputKey : null;
   };
 
 
@@ -555,26 +410,22 @@ function App() {
     if (customer.balance && customer.balance !== 0) return customer.balance;
 
 
-    const cName = customer.name.trim();
-    const cAddr = (customer.address || '').trim();
-    const customerBills = savedBills.filter(b => {
-      const bName = (b.customerName || '').trim();
-      const bAddr = (b.address || '').trim();
-      const nameMatch = bName === cName || (cName.includes('SRS') && bName.includes('SRS')) || bName.includes(cName) || cName.includes(bName);
-      const addrMatch = !bAddr || !cAddr || bAddr === cAddr;
-      return nameMatch && addrMatch;
-    });
+    const customerId = String(customer.id || resolvedKey || customerKey);
+    const customerBills = savedBills.filter(b => b.customerId === customerId);
 
     if (customerBills.length === 0) return 0;
 
 
-    const sortedBills = [...customerBills].sort((a, b) => (parseInt(b.billNo) || 0) - (parseInt(a.billNo) || 0));
+    const sortedBills = [...customerBills].sort((a, b) => (Number(b.billNo) || 0) - (Number(a.billNo) || 0));
     const latestBillBalance = Number(sortedBills[0].finalBalance) || 0;
 
 
     if (latestBillBalance !== 0) return latestBillBalance;
     return 0;
   };
+
+  const selectedCustomer = savedCustomers[selectedCustomerId];
+  const billNo = billNoPreview?.customerId === selectedCustomerId ? billNoPreview.billNo : '';
 
   return (
     <div className="container">
@@ -615,7 +466,7 @@ function App() {
           <div className="form-grid">
             <div className="form-group">
               <label>Bill No</label>
-              <input type="text" value={billNo} onChange={e => setBillNo(e.target.value)} />
+              <input type="text" value={billNo} readOnly />
             </div>
             <div className="form-group">
               <label>Date (DD-MM-YYYY)</label>
@@ -666,22 +517,19 @@ function App() {
             
             <div className="form-group" style={{ gridColumn: '1 / -1' }}>
               <label style={{ color: '#0b4b8a', fontWeight: 'bold' }}>🔎 Select Customer from List (Choose One)</label>
-              <input 
-                type="text" 
-                list="customers-list"
-                value={searchKey} 
-                onChange={e => handleSearchChange(e.target.value)} 
-                placeholder="Click to select from pre-loaded customers..."
+              <select
+                value={selectedCustomerId}
+                onChange={e => handleCustomerSelect(e.target.value)}
                 style={{ backgroundColor: '#e9ecef', border: '2px solid #0b4b8a' }}
-              />
-              <datalist id="customers-list">
-                {Object.keys(savedCustomers).map(key => (
-                  <option key={key} value={key} />
+              >
+                <option value="">Select a customer...</option>
+                {Object.entries(savedCustomers).map(([id, customer]) => (
+                  <option key={id} value={id}>{customer.name} - {customer.address}</option>
                 ))}
-              </datalist>
-              {((Number(prevBalance) || 0) > 0 || (savedCustomers[`${customerName} - ${address}`] && savedCustomers[`${customerName} - ${address}`].balance !== 0)) && (
+              </select>
+              {((Number(prevBalance) || 0) > 0 || (selectedCustomer && selectedCustomer.balance !== 0)) && (
                 <div style={{ marginTop: '10px', color: '#842029', fontWeight: 'bold', fontSize: '1.1em', padding: '10px', backgroundColor: '#f8d7da', border: '1px solid #f5c2c7', borderRadius: '5px' }}>
-                  ⚠️ This customer has a Previous Balance (முன் பாக்கி) of: Rs. {formatCurrency(Number(prevBalance) || savedCustomers[`${customerName} - ${address}`]?.balance || 0)}
+                  ⚠️ This customer has a Previous Balance (முன் பாக்கி) of: Rs. {formatCurrency(Number(prevBalance) || selectedCustomer?.balance || 0)}
                 </div>
               )}
             </div>
@@ -789,7 +637,12 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {savedBills.slice().reverse().map((bill, index) => (
+                  {savedBills.slice().sort((a, b) => {
+                    const customerCompare = `${a.customerName} - ${a.address}`.localeCompare(`${b.customerName} - ${b.address}`);
+                    return customerCompare
+                      || String(a.customerId || '').localeCompare(String(b.customerId || ''))
+                      || (Number(a.billNo) || 0) - (Number(b.billNo) || 0);
+                  }).map((bill, index) => (
                     <tr key={bill.id || `${bill.billNo}-${index}`}>
                       <td style={{ padding: '8px', border: '1px solid #ccc' }} className="text-center">{bill.billNo}</td>
                       <td style={{ padding: '8px', border: '1px solid #ccc' }} className="text-center">{formatDisplayDate(bill.date)}</td>
@@ -837,18 +690,12 @@ function App() {
             
             <div className="form-group" style={{ marginBottom: '1rem' }}>
               <label>Select Customer</label>
-              <input 
-                type="text" 
-                list="modal-customers-list"
-                value={paymentCustomerKey} 
-                onChange={e => setPaymentCustomerKey(e.target.value)} 
-                placeholder="Click to select customer..."
-              />
-              <datalist id="modal-customers-list">
-                {Object.keys(savedCustomers).map(key => (
-                  <option key={key} value={key} />
+              <select value={paymentCustomerKey} onChange={e => setPaymentCustomerKey(e.target.value)}>
+                <option value="">Select a customer...</option>
+                {Object.entries(savedCustomers).map(([id, customer]) => (
+                  <option key={id} value={id}>{customer.name} - {customer.address}</option>
                 ))}
-              </datalist>
+              </select>
             </div>
 
             {(() => {
@@ -920,10 +767,11 @@ function App() {
         <table className="bill-table">
           <thead>
             <tr>
-              <th style={{ width: '10%' }}>SL No.</th>
-              <th style={{ width: '45%' }}>Particulars</th>
-              <th style={{ width: '15%' }}>Qty<br/><small>Box / (KG)</small></th>
-              <th style={{ width: '30%' }}>Amount<br/><small></small></th>
+              <th style={{ width: '8%' }}>SL No.</th>
+              <th style={{ width: '40%' }}>Particulars</th>
+              <th style={{ width: '12%' }}>Qty<br/><small>Box</small></th>
+              <th style={{ width: '18%' }}>Rate<br/><small>Rs.</small></th>
+              <th style={{ width: '22%' }}>Amount<br/><small>Rs.</small></th>
             </tr>
           </thead>
           <tbody>
@@ -932,6 +780,7 @@ function App() {
                 <td className="text-center">{index + 1}</td>
                 <td>{item.particulars}</td>
                 <td className="text-center">{item.qty}</td>
+                <td className="text-center">{item.rate || item.price}</td>
                 <td className="font-bold" style={{ textAlign: 'right' }}>
                   {formatCurrency((Number(item.quantity ?? item.qty) || 0) * (Number(item.price ?? item.rate) || 0))}
                 </td>
@@ -940,19 +789,19 @@ function App() {
             
             {/* Previous Balance Row */}
             <tr>
-              <td colSpan={3} className="text-right font-bold" style={{color: 'blue'}}>முன் பாக்கி =&gt;</td>
+              <td colSpan={4} className="text-right font-bold" style={{color: 'blue'}}>முன் பாக்கி =&gt;</td>
               <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(Number(prevBalance) || 0)}</td>
             </tr>
 
             {/* Subtotal Row */}
             <tr>
-              <td colSpan={3}></td>
+              <td colSpan={4}></td>
               <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(subTotal)}</td>
             </tr>
 
             {/* Advance Row */}
             <tr>
-              <td colSpan={3} className="text-right font-bold" style={{color: 'blue'}}>Advance (வரவு) =&gt;</td>
+              <td colSpan={4} className="text-right font-bold" style={{color: 'blue'}}>Advance (வரவு) =&gt;</td>
               <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(Number(advance) || 0)}</td>
             </tr>
 
@@ -961,15 +810,15 @@ function App() {
               <td colSpan={1} rowSpan={3} style={{verticalAlign: 'bottom', borderRight: 'none'}}>
                 <b>Thank You!</b>
               </td>
-              <td colSpan={2} className="font-bold">Total Amount</td>
+              <td colSpan={3} className="font-bold">Total Amount</td>
               <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(subTotal)}</td>
             </tr>
             <tr>
-              <td colSpan={2} className="font-bold">Advance</td>
+              <td colSpan={3} className="font-bold">Advance</td>
               <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(Number(advance) || 0)}</td>
             </tr>
             <tr>
-              <td colSpan={2} className="font-bold">Balance</td>
+              <td colSpan={3} className="font-bold">Balance</td>
               <td className="font-bold" style={{ textAlign: 'right' }}>{formatCurrency(finalBalance)}</td>
             </tr>
           </tbody>

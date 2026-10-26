@@ -4,11 +4,14 @@ import {
   getDocs, 
   addDoc, 
   doc,
+  getDoc,
   updateDoc, 
   deleteDoc, 
   query, 
   where, 
-  writeBatch 
+  writeBatch,
+  runTransaction,
+  Timestamp
 } from 'firebase/firestore';
 
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
@@ -24,6 +27,7 @@ export interface CustomerData {
   name: string;
   address: string;
   balance: number;
+  lastBillNo?: number;
 }
 
 export interface BillItem {
@@ -40,6 +44,7 @@ export interface BillItem {
 
 export interface SavedBill {
   id?: number | string;
+  customerId?: string;
   billNo: string;
   date: string;
   customerName: string;
@@ -92,6 +97,30 @@ export const formatDateToYMD = (dateStr: string): string => {
 
 export const formatDisplayDate = (dateStr: string): string => {
   return formatDateToDMY(dateStr);
+};
+
+const formatFirestoreDate = (value: unknown): string => {
+  if (value instanceof Timestamp) {
+    return formatDateToDMY(value.toDate().toISOString().slice(0, 10));
+  }
+  if (value instanceof Date) {
+    return formatDateToDMY(value.toISOString().slice(0, 10));
+  }
+  return formatDateToDMY(String(value || ''));
+};
+
+const parseBillDate = (dateStr: string): Date => {
+  const normalized = formatDateToYMD(dateStr);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized);
+  if (!match) {
+    throw new Error(`Invalid bill date: ${dateStr}`);
+  }
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (date.getUTCFullYear() !== Number(year) || date.getUTCMonth() !== Number(month) - 1 || date.getUTCDate() !== Number(day)) {
+    throw new Error(`Invalid bill date: ${dateStr}`);
+  }
+  return date;
 };
 
 // Default initial customers list (Tamil)
@@ -156,11 +185,12 @@ export const getLocalBills = (): SavedBill[] => {
       };
     });
 
-    // Ensure sorted by billNo descending
+    // Sort by customer, then bill number.
     list.sort((a, b) => {
-      const numA = parseInt(a.billNo) || 0;
-      const numB = parseInt(b.billNo) || 0;
-      return numB - numA;
+      const customerCompare = `${a.customerName} - ${a.address}`.localeCompare(`${b.customerName} - ${b.address}`);
+      return customerCompare
+        || String(a.customerId || '').localeCompare(String(b.customerId || ''))
+        || (Number(a.billNo) || 0) - (Number(b.billNo) || 0);
     });
 
     if (modified) {
@@ -240,32 +270,20 @@ export const getCustomers = async (): Promise<CustomerData[]> => {
     const customersCol = collection(db, 'customers');
     const snapshot = await getDocs(customersCol);
     if (!snapshot.empty) {
-      const map = new Map<string, CustomerData>();
+      const customers: CustomerData[] = [];
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
         const name = (data.name || '').trim();
         const address = (data.address || '').trim();
-        const balance = Number(data.balance) || 0;
-        const key = `${name} - ${address}`;
-
-        const existing = map.get(key);
-        if (!existing) {
-          map.set(key, {
-            id: docSnap.id,
-            name,
-            address,
-            balance,
-          });
-        } else if (existing.balance === 0 && balance !== 0) {
-          map.set(key, {
-            id: docSnap.id,
-            name,
-            address,
-            balance,
-          });
-        }
+        customers.push({
+          id: docSnap.id,
+          name,
+          address,
+          balance: Number(data.balance) || 0,
+          lastBillNo: Number(data.lastBillNo) || 0
+        });
       });
-      const list = Array.from(map.values());
+      const list = customers;
       saveLocalCustomers(list);
       return list;
     } else {
@@ -278,6 +296,7 @@ export const getCustomers = async (): Promise<CustomerData[]> => {
           name: c.name,
           address: c.address,
           balance: c.balance,
+          lastBillNo: 0,
           createdAt: new Date().toISOString()
         };
         batch.set(newDocRef, docData);
@@ -319,6 +338,7 @@ export const createCustomer = async (customer: CustomerData): Promise<CustomerDa
       name: customer.name.trim(),
       address: (customer.address || '').trim(),
       balance: Number(customer.balance) || 0,
+      lastBillNo: 0,
       createdAt: new Date().toISOString()
     });
     const result: CustomerData = {
@@ -504,7 +524,8 @@ export const getBills = async (): Promise<SavedBill[]> => {
         list.push({
           id: docSnap.id,
           billNo: String(data.billNo || ''),
-          date: formatDateToDMY(String(data.date || '')),
+          customerId: String(data.customerId || ''),
+          date: formatFirestoreDate(data.date),
           customerName: String(data.customerName || ''),
           address: String(data.address || ''),
           items: mappedItems,
@@ -516,16 +537,16 @@ export const getBills = async (): Promise<SavedBill[]> => {
           receipt: adv,
           totalAmount: Number(data.totalAmount) || 0,
           finalBalance: Number(data.finalBalance) || 0,
-          createdAt: data.createdAt
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : data.createdAt
         });
       });
 
-      // Reliably order bills descending by billNo (highest/newest first)
+      // Keep history grouped by customer and ordered by that customer's sequence.
       list.sort((a, b) => {
-        const numA = parseInt(a.billNo) || 0;
-        const numB = parseInt(b.billNo) || 0;
-        if (numB !== numA) return numB - numA;
-        return (b.createdAt || '').localeCompare(a.createdAt || '');
+        const customerCompare = `${a.customerName} - ${a.address}`.localeCompare(`${b.customerName} - ${b.address}`);
+        return customerCompare
+          || String(a.customerId || '').localeCompare(String(b.customerId || ''))
+          || (Number(a.billNo) || 0) - (Number(b.billNo) || 0);
       });
 
       saveLocalBills(list);
@@ -568,7 +589,8 @@ export const getBills = async (): Promise<SavedBill[]> => {
           return {
             id: b.id,
             billNo: String(b.billNo || ''),
-            date: formatDateToDMY(String(b.date || '')),
+            customerId: String(b.customerId || ''),
+            date: formatFirestoreDate(b.date),
             customerName: String(b.customerName || ''),
             address: String(b.address || ''),
             items: mappedItems,
@@ -584,7 +606,12 @@ export const getBills = async (): Promise<SavedBill[]> => {
           };
         });
 
-        list.sort((a, b) => (parseInt(b.billNo) || 0) - (parseInt(a.billNo) || 0));
+        list.sort((a, b) => {
+          const customerCompare = `${a.customerName} - ${a.address}`.localeCompare(`${b.customerName} - ${b.address}`);
+          return customerCompare
+            || String(a.customerId || '').localeCompare(String(b.customerId || ''))
+            || (Number(a.billNo) || 0) - (Number(b.billNo) || 0);
+        });
         saveLocalBills(list);
         return list;
       }
@@ -596,9 +623,46 @@ export const getBills = async (): Promise<SavedBill[]> => {
   return getLocalBills();
 };
 
+export const getNextBillNo = async (customerId: string): Promise<number> => {
+  if (!customerId) {
+    throw new Error('Select a customer before requesting the next bill number.');
+  }
+  const customerRef = doc(db, 'customers', customerId);
+  const customerSnapshot = await getDoc(customerRef);
+  if (!customerSnapshot.exists()) {
+    throw new Error('The selected customer no longer exists in Firestore.');
+  }
+  const data = customerSnapshot.data();
+  let lastBillNo = data.lastBillNo;
+  // Auto-heal: if lastBillNo is missing or invalid, initialise it to 0
+  if (!Number.isInteger(lastBillNo) || lastBillNo < 0) {
+    // Derive from existing bills for this customer if possible
+    try {
+      const billsSnap = await getDocs(query(collection(db, 'bills'), where('customerId', '==', customerId)));
+      const maxNo = billsSnap.docs.reduce((max, d) => Math.max(max, Number(d.data().billNo) || 0), 0);
+      lastBillNo = maxNo;
+    } catch {
+      lastBillNo = 0;
+    }
+    // Persist the healed value so future calls are fast
+    try {
+      await updateDoc(customerRef, { lastBillNo });
+    } catch {
+      // non-fatal
+    }
+  }
+  return lastBillNo + 1;
+};
+
 export const createBill = async (bill: SavedBill): Promise<SavedBill> => {
+  if (!bill.customerId) {
+    throw new Error('A Firestore customer document ID is required to save a bill.');
+  }
   const adv = bill.advance !== undefined && bill.advance !== '' ? bill.advance : (bill.receipt ?? '');
   const prevBal = bill.previousBalance !== undefined && bill.previousBalance !== '' ? bill.previousBalance : (bill.prevBalance ?? '');
+  const customerId = bill.customerId;
+  const customerRef = doc(db, 'customers', customerId);
+  const billRef = doc(collection(db, 'bills'));
 
   const mappedItems: BillItem[] = bill.items.map(item => {
     const q = item.quantity !== undefined && item.quantity !== '' ? item.quantity : (item.qty ?? '');
@@ -619,12 +683,13 @@ export const createBill = async (bill: SavedBill): Promise<SavedBill> => {
   const totalQty = mappedItems.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
   const avgPrice = mappedItems.length > 0 ? (Number(mappedItems[0].price) || 0) : 0;
 
-  // Exact ordered schema:
-  // 1. billNo, 2. date, 3. customerName, 4. address, 5. quantity, 6. price,
-  // 7. previousBalance, 8. advance (replaced receipt), 9. totalAmount
+  const totalAmount = Number(bill.totalAmount) || 0;
+  const advance = Number(adv) || 0;
+  const finalBalance = totalAmount - advance;
+  const date = Timestamp.fromDate(parseBillDate(String(bill.date)));
   const payload = {
-    billNo: String(bill.billNo),
-    date: formatDateToDMY(String(bill.date)),
+    customerId,
+    date,
     customerName: bill.customerName.trim(),
     address: (bill.address || '').trim(),
     quantity: totalQty,
@@ -632,84 +697,47 @@ export const createBill = async (bill: SavedBill): Promise<SavedBill> => {
     items: mappedItems,
     previousBalance: String(prevBal),
     prevBalance: String(prevBal),
-    advance: String(adv),
-    receipt: String(adv),
-    totalAmount: Number(bill.totalAmount) || 0,
-    finalBalance: Number(bill.finalBalance) || 0,
+    advance,
+    receipt: advance,
+    totalAmount,
+    finalBalance,
+    createdAt: Timestamp.now()
+  };
+
+  let billNo = 0;
+  await runTransaction(db, async transaction => {
+    const customerSnapshot = await transaction.get(customerRef);
+    if (!customerSnapshot.exists()) {
+      throw new Error('The selected customer no longer exists in Firestore.');
+    }
+    let lastBillNo = customerSnapshot.data().lastBillNo;
+    // Auto-heal: derive from existing bills if lastBillNo is missing/invalid
+    if (!Number.isInteger(lastBillNo) || lastBillNo < 0) {
+      const billsSnap = await getDocs(query(collection(db, 'bills'), where('customerId', '==', customerId)));
+      lastBillNo = billsSnap.docs.reduce((max, d) => Math.max(max, Number(d.data().billNo) || 0), 0);
+    }
+    billNo = lastBillNo + 1;
+    transaction.update(customerRef, {
+      lastBillNo: billNo,
+      balance: finalBalance,
+      updatedAt: new Date().toISOString()
+    });
+    transaction.set(billRef, { billNo, ...payload });
+  });
+
+  const localBill: SavedBill = {
+    ...bill,
+    id: billRef.id,
+    customerId,
+    billNo: String(billNo),
+    date: formatDateToDMY(String(bill.date)),
+    advance,
+    totalAmount,
+    finalBalance,
     createdAt: new Date().toISOString()
   };
-
-  // 1. Try Firebase Firestore
-  try {
-    const docRef = await addDoc(collection(db, 'bills'), payload);
-    const savedBillResult: SavedBill = {
-      id: docRef.id,
-      ...payload
-    };
-
-    // Auto update customer balance in Firestore
-    try {
-      await updateCustomer(0, {
-        name: bill.customerName,
-        address: bill.address || '',
-        balance: bill.finalBalance
-      });
-    } catch (e) {
-      console.warn('[Firebase] Failed to update customer balance on bill save:', e);
-    }
-
-    // Cache locally
-    const currentBills = getLocalBills();
-    saveLocalBills([savedBillResult, ...currentBills.filter(b => b.billNo !== savedBillResult.billNo)]);
-
-    return savedBillResult;
-  } catch (firebaseErr) {
-    console.warn('[Firebase] Firestore createBill fallback:', firebaseErr);
-  }
-
-  // 2. Try Node Backend
-  try {
-    const res = await fetch(`${API_BASE_URL}/bills`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (res.ok) {
-      const savedBillResult: SavedBill = await res.json();
-      const currentBills = getLocalBills();
-      saveLocalBills([savedBillResult, ...currentBills.filter(b => b.billNo !== savedBillResult.billNo)]);
-      return savedBillResult;
-    }
-  } catch {
-    // ignore
-  }
-
-  // 3. Local fallback
-  const localBill: SavedBill = {
-    ...payload,
-    id: Date.now()
-  };
   const currentBills = getLocalBills();
-  saveLocalBills([localBill, ...currentBills.filter(b => b.billNo !== localBill.billNo)]);
-
-  // Update customer balance locally
-  const currentCustomers = getLocalCustomers();
-  const safeCustomers = Array.isArray(currentCustomers) ? [...currentCustomers] : [];
-  const existingIdx = safeCustomers.findIndex(
-    c => c.name === bill.customerName && c.address === (bill.address || '')
-  );
-  if (existingIdx >= 0) {
-    safeCustomers[existingIdx].balance = bill.finalBalance;
-  } else {
-    safeCustomers.push({
-      id: Date.now(),
-      name: bill.customerName,
-      address: bill.address || '',
-      balance: bill.finalBalance,
-    });
-  }
-  saveLocalCustomers(safeCustomers);
-
+  saveLocalBills([localBill, ...currentBills.filter(existing => existing.id !== localBill.id)]);
   return localBill;
 };
 
