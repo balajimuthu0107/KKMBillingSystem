@@ -11,7 +11,13 @@ import {
   writeBatch 
 } from 'firebase/firestore';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
+const isLocalApiUrl = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(configuredApiUrl || '');
+
+// A localhost API URL is reachable only from the developer's machine, not production visitors.
+const API_BASE_URL = import.meta.env.PROD && isLocalApiUrl
+  ? '/api'
+  : configuredApiUrl || '/api';
 
 export interface CustomerData {
   id?: number | string;
