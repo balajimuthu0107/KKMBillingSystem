@@ -1,19 +1,3 @@
-import { db } from './firebase';
-import { 
-  collection, 
-  getDocs, 
-  addDoc, 
-  doc,
-  getDoc,
-  setDoc,
-  updateDoc, 
-  deleteDoc, 
-  query, 
-  where, 
-  writeBatch,
-  Timestamp
-} from 'firebase/firestore';
-
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
 const isLocalApiUrl = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(configuredApiUrl || '');
 
@@ -74,7 +58,7 @@ export const formatDateToDMY = (dateStr: string): string => {
     return `${dd}-${mm}-${yyyy}`;
   }
   if (/^\d{4}\/\d{2}\/\d{2}$/.test(trimmed)) {
-    const [yyyy, mm, dd] = trimmed.split('/');
+    const [dd, mm, yyyy] = trimmed.split('/');
     return `${dd}-${mm}-${yyyy}`;
   }
   return trimmed;
@@ -99,30 +83,6 @@ export const formatDisplayDate = (dateStr: string): string => {
   return formatDateToDMY(dateStr);
 };
 
-const formatFirestoreDate = (value: unknown): string => {
-  if (value && typeof value === 'object' && typeof (value as any).toDate === 'function') {
-    return formatDateToDMY((value as any).toDate().toISOString().slice(0, 10));
-  }
-  if (value instanceof Date) {
-    return formatDateToDMY(value.toISOString().slice(0, 10));
-  }
-  return formatDateToDMY(String(value || ''));
-};
-
-const parseBillDate = (dateStr: string): Date => {
-  const normalized = formatDateToYMD(dateStr);
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized);
-  if (!match) {
-    throw new Error(`Invalid bill date: ${dateStr}`);
-  }
-  const [, year, month, day] = match;
-  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
-  if (date.getUTCFullYear() !== Number(year) || date.getUTCMonth() !== Number(month) - 1 || date.getUTCDate() !== Number(day)) {
-    throw new Error(`Invalid bill date: ${dateStr}`);
-  }
-  return date;
-};
-
 // Default initial customers list (Tamil & English) - 13 Unique Customers
 export const DEFAULT_INITIAL_CUSTOMERS: CustomerData[] = [
   { id: 1, name: "Pachaippan", address: "KKM", balance: 0 },
@@ -140,15 +100,18 @@ export const DEFAULT_INITIAL_CUSTOMERS: CustomerData[] = [
   { id: 13, name: "ஹரிதாஸ்", address: "வேட்டவலம்", balance: 0 }
 ];
 
-// Helper to prevent Firestore from hanging indefinitely if offline
-const withTimeout = <T>(promise: Promise<T>, ms = 15000): Promise<T> => {
+// Network timeout helper
+const withTimeout = <T>(promise: Promise<T>, ms = 10000): Promise<T> => {
   return Promise.race([
     promise,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Firestore operation timed out')), ms))
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Network request timed out')), ms))
   ]);
 };
 
-// Local storage backup helpers
+// ==========================================
+// Local Storage Backup Helpers
+// ==========================================
+
 export const getLocalBills = (): SavedBill[] => {
   try {
     const raw = localStorage.getItem('kkm_bills');
@@ -160,8 +123,7 @@ export const getLocalBills = (): SavedBill[] => {
     } else if (parsed && typeof parsed === 'object') {
       list = Object.values(parsed).filter((b: any) => b && typeof b === 'object' && b.billNo) as SavedBill[];
     }
-    let modified = false;
-    list = list.map((b, idx) => {
+    return list.map((b, idx) => {
       const adv = b.advance !== undefined ? b.advance : (b.receipt !== undefined ? b.receipt : '');
       const prevBal = b.previousBalance !== undefined ? b.previousBalance : (b.prevBalance !== undefined ? b.prevBalance : '');
       const mappedItems = (Array.isArray(b.items) ? b.items : []).map((it: any) => ({
@@ -172,20 +134,10 @@ export const getLocalBills = (): SavedBill[] => {
         rate: it.rate !== undefined ? it.rate : (it.price !== undefined ? it.price : '')
       }));
 
-      if (!b.id) {
-        modified = true;
-        return { 
-          ...b, 
-          id: Date.now() + idx,
-          advance: adv,
-          receipt: adv,
-          previousBalance: prevBal,
-          prevBalance: prevBal,
-          items: mappedItems
-        };
-      }
       return {
         ...b,
+        id: b.id || Date.now() + idx,
+        date: formatDateToDMY(String(b.date || '')),
         advance: adv,
         receipt: adv,
         previousBalance: prevBal,
@@ -193,19 +145,6 @@ export const getLocalBills = (): SavedBill[] => {
         items: mappedItems
       };
     });
-
-    // Sort by customer, then bill number.
-    list.sort((a, b) => {
-      const customerCompare = `${a.customerName} - ${a.address}`.localeCompare(`${b.customerName} - ${b.address}`);
-      return customerCompare
-        || String(a.customerId || '').localeCompare(String(b.customerId || ''))
-        || (Number(a.billNo) || 0) - (Number(b.billNo) || 0);
-    });
-
-    if (modified) {
-      saveLocalBills(list);
-    }
-    return list;
   } catch {
     return [];
   }
@@ -213,296 +152,149 @@ export const getLocalBills = (): SavedBill[] => {
 
 export const saveLocalBills = (bills: SavedBill[]) => {
   try {
-    const arr = Array.isArray(bills)
-      ? bills
-      : (bills && typeof bills === 'object')
-        ? Object.values(bills)
-        : [];
-    localStorage.setItem('kkm_bills', JSON.stringify(arr));
-  } catch (e) {
-    console.error('Failed to save bills to localStorage', e);
+    localStorage.setItem('kkm_bills', JSON.stringify(bills));
+  } catch (err) {
+    console.error('Failed to save bills to localStorage', err);
   }
 };
 
 export const getLocalCustomers = (): CustomerData[] => {
   try {
     const raw = localStorage.getItem('kkm_customers');
+    if (!raw) {
+      saveLocalCustomers(DEFAULT_INITIAL_CUSTOMERS);
+      return DEFAULT_INITIAL_CUSTOMERS;
+    }
+    const parsed = JSON.parse(raw);
     let list: CustomerData[] = [];
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          list = parsed.filter(c => c && typeof c === 'object' && c.name);
-        }
-      } catch {
-        list = [];
-      }
+    if (Array.isArray(parsed)) {
+      list = parsed;
+    } else if (parsed && typeof parsed === 'object') {
+      list = Object.values(parsed).filter((c: any) => c && typeof c === 'object' && c.name) as CustomerData[];
     }
-
     if (list.length === 0) {
-      list = [...DEFAULT_INITIAL_CUSTOMERS];
-      saveLocalCustomers(list);
-      return list;
+      saveLocalCustomers(DEFAULT_INITIAL_CUSTOMERS);
+      return DEFAULT_INITIAL_CUSTOMERS;
     }
-
-    // Ensure all default initial customers are present in cached list
-    for (const def of DEFAULT_INITIAL_CUSTOMERS) {
-      if (!list.some(c => c && c.name && c.name.trim().toLowerCase() === def.name.trim().toLowerCase())) {
-        list.push({ ...def, id: def.id || Date.now() });
-      }
-    }
-
-    // Deduplicate any repeated customer names
-    const seen = new Set<string>();
-    const deduplicated = list.filter(c => {
-      if (!c || !c.name) return false;
-      const key = c.name.trim().toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-    saveLocalCustomers(deduplicated);
-    return deduplicated.length > 0 ? deduplicated : [...DEFAULT_INITIAL_CUSTOMERS];
+    return list;
   } catch {
-    return [...DEFAULT_INITIAL_CUSTOMERS];
+    return DEFAULT_INITIAL_CUSTOMERS;
   }
 };
 
 export const saveLocalCustomers = (customers: CustomerData[]) => {
   try {
-    const arr = Array.isArray(customers)
-      ? customers
-      : (customers && typeof customers === 'object')
-        ? Object.values(customers)
-        : [];
-    localStorage.setItem('kkm_customers', JSON.stringify(arr));
-  } catch (e) {
-    console.error('Failed to save customers to localStorage', e);
+    localStorage.setItem('kkm_customers', JSON.stringify(customers));
+  } catch (err) {
+    console.error('Failed to save customers to localStorage', err);
   }
 };
 
 // ==========================================
-// Customers API (Firebase Firestore & Backup)
+// Customers API (MongoDB Atlas Backend & Backup)
 // ==========================================
 
 export const getCustomers = async (): Promise<CustomerData[]> => {
-  // 1. Try Firebase Firestore
   try {
-    const customersCol = collection(db, 'customers');
-    const snapshot = await withTimeout(getDocs(customersCol), 3500);
-    if (!snapshot.empty) {
-      const customers: CustomerData[] = [];
-      snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        const name = (data.name || '').trim();
-        const address = (data.address || '').trim();
-        customers.push({
-          id: docSnap.id,
-          name,
-          address,
-          balance: Number(data.balance) || 0,
-          lastBillNo: Number(data.lastBillNo) || 0
-        });
-      });
-
-      // Automatically include any missing DEFAULT_INITIAL_CUSTOMERS
-      for (const def of DEFAULT_INITIAL_CUSTOMERS) {
-        const exists = customers.some(c => 
-          c.name.trim().toLowerCase() === def.name.trim().toLowerCase()
-        );
-        if (!exists) {
-          customers.push({
-            id: String(def.id || Date.now()),
-            name: def.name,
-            address: def.address,
-            balance: def.balance,
-            lastBillNo: 0
-          });
-          // Non-blocking sync to Firestore
-          addDoc(collection(db, 'customers'), {
-            name: def.name,
-            address: def.address,
-            balance: def.balance,
-            lastBillNo: 0,
-            createdAt: new Date().toISOString()
-          }).catch(() => {});
-        }
-      }
-
-      // Deduplicate any repeated customer names
-      const seen = new Set<string>();
-      const list = customers.filter(c => {
-        const key = (c.name || '').trim().toLowerCase();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      saveLocalCustomers(list);
-      return list;
-    } else {
-      // Auto seed default customers into Firebase Firestore
-      const batch = writeBatch(db);
-      const seeded: CustomerData[] = [];
-      for (const c of DEFAULT_INITIAL_CUSTOMERS) {
-        const newDocRef = doc(collection(db, 'customers'));
-        const docData = {
-          name: c.name,
-          address: c.address,
-          balance: c.balance,
-          lastBillNo: 0,
-          createdAt: new Date().toISOString()
-        };
-        batch.set(newDocRef, docData);
-        seeded.push({ id: newDocRef.id, ...docData });
-      }
-      await batch.commit();
-      saveLocalCustomers(seeded);
-      return seeded;
-    }
-  } catch (firebaseErr) {
-    console.warn('[Firebase] Firestore getCustomers fallback:', firebaseErr);
-  }
-
-  // 2. Try Node.js Backend
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch(`${API_BASE_URL}/customers`, { signal: controller.signal });
-    clearTimeout(timeoutId);
-
+    const res = await withTimeout(fetch(`${API_BASE_URL}/customers`), 8000);
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) {
-        saveLocalCustomers(data);
-        return data;
+        const seen = new Set<string>();
+        const list = data.filter((c: any) => {
+          const key = (c.name || '').trim().toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        }).map((c: any) => ({
+          id: c.id || c._id,
+          name: String(c.name || '').trim(),
+          address: String(c.address || '').trim(),
+          balance: Number(c.balance) || 0,
+          lastBillNo: Number(c.lastBillNo) || 0
+        }));
+
+        saveLocalCustomers(list);
+        return list;
       }
     }
-  } catch {
-    // Backend offline, fallback to local
+  } catch (err) {
+    console.warn('[API] Could not fetch customers from backend:', err);
   }
 
   return getLocalCustomers();
 };
 
 export const createCustomer = async (customer: CustomerData): Promise<CustomerData> => {
-  // 1. Try Firebase Firestore
-  try {
-    const docRef = await addDoc(collection(db, 'customers'), {
-      name: customer.name.trim(),
-      address: (customer.address || '').trim(),
-      balance: Number(customer.balance) || 0,
-      lastBillNo: 0,
-      createdAt: new Date().toISOString()
-    });
-    const result: CustomerData = {
-      id: docRef.id,
-      name: customer.name.trim(),
-      address: (customer.address || '').trim(),
-      balance: Number(customer.balance) || 0
-    };
-    const current = getLocalCustomers();
-    saveLocalCustomers([...current.filter(c => c.name !== result.name || c.address !== result.address), result]);
-    return result;
-  } catch (firebaseErr) {
-    console.warn('[Firebase] Firestore createCustomer fallback:', firebaseErr);
-  }
-
-  // 2. Try Backend
   try {
     const res = await fetch(`${API_BASE_URL}/customers`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(customer)
+      body: JSON.stringify({
+        name: customer.name.trim(),
+        address: (customer.address || '').trim(),
+        balance: Number(customer.balance) || 0
+      })
     });
     if (res.ok) {
       const data = await res.json();
+      const newCust: CustomerData = {
+        id: data.id || data._id,
+        name: data.name,
+        address: data.address,
+        balance: Number(data.balance) || 0,
+        lastBillNo: Number(data.lastBillNo) || 0
+      };
       const current = getLocalCustomers();
-      saveLocalCustomers([...current.filter(c => c.name !== data.name || c.address !== data.address), data]);
-      return data;
+      saveLocalCustomers([...current.filter(c => c.name !== newCust.name || c.address !== newCust.address), newCust]);
+      return newCust;
     }
-  } catch {
-    // fallback
+  } catch (err) {
+    console.warn('[API] createCustomer fallback to local:', err);
   }
 
-  // 3. Local fallback
   const result: CustomerData = {
     ...customer,
-    id: customer.id || Date.now(),
+    id: customer.id || Date.now()
   };
   const current = getLocalCustomers();
-  saveLocalCustomers([...(Array.isArray(current) ? current : []), result]);
+  saveLocalCustomers([...current.filter(c => c.name !== result.name || c.address !== result.address), result]);
   return result;
 };
 
 export const updateCustomer = async (id: number | string, customer: CustomerData): Promise<CustomerData> => {
-  // 1. Try Firebase Firestore
-  try {
-    let targetDocId: string | null = (id && typeof id === 'string' && isNaN(Number(id))) ? String(id) : null;
-    
-    if (!targetDocId) {
-      const q = query(
-        collection(db, 'customers'), 
-        where('name', '==', customer.name.trim())
-      );
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const match = snap.docs.find(d => (d.data().address || '').trim() === (customer.address || '').trim()) || snap.docs[0];
-        targetDocId = match.id;
-      }
-    }
-
-    if (targetDocId) {
-      const docRef = doc(db, 'customers', targetDocId);
-      await updateDoc(docRef, {
-        name: customer.name.trim(),
-        address: (customer.address || '').trim(),
-        balance: Number(customer.balance) || 0,
-        updatedAt: new Date().toISOString()
-      });
-      const result: CustomerData = {
-        id: targetDocId,
-        name: customer.name.trim(),
-        address: (customer.address || '').trim(),
-        balance: Number(customer.balance) || 0
-      };
-      const current = getLocalCustomers();
-      const safe = Array.isArray(current) ? [...current] : [];
-      const idx = safe.findIndex(c => c.id === targetDocId || (c.name === customer.name && c.address === (customer.address || '')));
-      if (idx >= 0) safe[idx] = result;
-      else safe.push(result);
-      saveLocalCustomers(safe);
-      return result;
-    } else {
-      return createCustomer(customer);
-    }
-  } catch (firebaseErr) {
-    console.warn('[Firebase] Firestore updateCustomer fallback:', firebaseErr);
-  }
-
-  // 2. Try Node Backend
   try {
     const endpoint = id ? `${API_BASE_URL}/customers/${encodeURIComponent(id)}` : `${API_BASE_URL}/customers`;
     const res = await fetch(endpoint, {
       method: id ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(customer)
+      body: JSON.stringify({
+        name: customer.name.trim(),
+        address: (customer.address || '').trim(),
+        balance: Number(customer.balance) || 0
+      })
     });
     if (res.ok) {
       const data = await res.json();
+      const updatedCust: CustomerData = {
+        id: data.id || data._id || id,
+        name: data.name,
+        address: data.address,
+        balance: Number(data.balance) || 0,
+        lastBillNo: Number(data.lastBillNo) || 0
+      };
       const current = getLocalCustomers();
       const safe = Array.isArray(current) ? [...current] : [];
       const idx = safe.findIndex(c => (id && c.id === id) || (c.name === customer.name && c.address === (customer.address || '')));
-      if (idx >= 0) safe[idx] = data;
-      else safe.push(data);
+      if (idx >= 0) safe[idx] = updatedCust;
+      else safe.push(updatedCust);
       saveLocalCustomers(safe);
-      return data;
+      return updatedCust;
     }
-  } catch {
-    // fallback
+  } catch (err) {
+    console.warn('[API] updateCustomer fallback to local:', err);
   }
 
-  // 3. Local fallback
   const current = getLocalCustomers();
   const safeCurrent = Array.isArray(current) ? [...current] : [];
   const idx = safeCurrent.findIndex(
@@ -523,14 +315,6 @@ export const updateCustomer = async (id: number | string, customer: CustomerData
 
 export const deleteCustomer = async (id: number | string): Promise<void> => {
   try {
-    if (typeof id === 'string' && isNaN(Number(id))) {
-      await deleteDoc(doc(db, 'customers', id));
-    }
-  } catch (firebaseErr) {
-    console.warn('[Firebase] Firestore deleteCustomer fallback:', firebaseErr);
-  }
-
-  try {
     await fetch(`${API_BASE_URL}/customers/${encodeURIComponent(id)}`, { method: 'DELETE' });
   } catch {
     // ignore
@@ -542,185 +326,40 @@ export const deleteCustomer = async (id: number | string): Promise<void> => {
 };
 
 // ==========================================
-// Bills API (Firebase Firestore & Backup)
+// Bills API (MongoDB Atlas Backend & Backup)
 // ==========================================
 
-export const uploadBillToFirestore = async (bill: SavedBill): Promise<string> => {
-  const billRef = doc(collection(db, 'bills'));
-  let billDate: Date;
-  try {
-    billDate = parseBillDate(String(bill.date));
-  } catch {
-    billDate = new Date();
-  }
-
-  const billNoNum = Number(bill.billNo) || 1;
-  const adv = bill.advance !== undefined && bill.advance !== '' ? Number(bill.advance) : (bill.receipt !== undefined ? Number(bill.receipt) : 0);
-  const prevBal = bill.previousBalance !== undefined && bill.previousBalance !== '' ? String(bill.previousBalance) : String(bill.prevBalance ?? '0');
-  
-  const mappedItems: BillItem[] = (Array.isArray(bill.items) ? bill.items : []).map(item => {
-    const q = item.quantity !== undefined && item.quantity !== '' ? item.quantity : (item.qty ?? '');
-    const p = item.price !== undefined && item.price !== '' ? item.price : (item.rate ?? '');
-    const kg = item.kg !== undefined ? item.kg : '';
-    return {
-      id: String(item.id || item.frontendId || ''),
-      frontendId: String(item.id || item.frontendId || ''),
-      particulars: String(item.particulars || ''),
-      quantity: q,
-      qty: q,
-      kg: String(kg),
-      price: p,
-      rate: p,
-      amount: (Number(q) || 0) * (Number(p) || 0)
-    };
-  });
-
-  const totalQty = mappedItems.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
-  const avgPrice = mappedItems.length > 0 ? (Number(mappedItems[0].price) || 0) : 0;
-  const totalAmount = Number(bill.totalAmount) || 0;
-  const finalBalance = totalAmount - adv;
-
-  const payload = {
-    billNo: billNoNum,
-    customerId: String(bill.customerId || ''),
-    customerName: String(bill.customerName || '').trim(),
-    address: String(bill.address || '').trim(),
-    date: Timestamp.fromDate(billDate),
-    quantity: totalQty,
-    price: avgPrice,
-    items: mappedItems,
-    previousBalance: String(prevBal),
-    prevBalance: String(prevBal),
-    advance: adv,
-    receipt: adv,
-    totalAmount,
-    finalBalance,
-    createdAt: Timestamp.now()
-  };
-
-  await setDoc(billRef, payload);
-  return billRef.id;
-};
-
 export const getBills = async (): Promise<SavedBill[]> => {
-  let list: SavedBill[] = [];
-
-  // 1. Try Firebase Firestore with resilient in-memory ordering
   try {
-    const billsCol = collection(db, 'bills');
-    const snapshot = await withTimeout(getDocs(billsCol), 15000);
-    snapshot.forEach(docSnap => {
-      const data = docSnap.data();
-      const adv = data.advance !== undefined ? data.advance : (data.receipt !== undefined ? data.receipt : '');
-      const prevBal = data.previousBalance !== undefined ? data.previousBalance : (data.prevBalance !== undefined ? data.prevBalance : '');
-      
-      const rawItems = Array.isArray(data.items) ? data.items : [];
-      const mappedItems: BillItem[] = rawItems.map((it: any) => {
-        const q = it.quantity !== undefined ? it.quantity : (it.qty !== undefined ? it.qty : '');
-        const p = it.price !== undefined ? it.price : (it.rate !== undefined ? it.rate : '');
-        const kg = it.kg !== undefined ? it.kg : '';
-        return {
-          id: it.id || it.frontendId,
-          frontendId: it.frontendId || String(it.id || ''),
-          particulars: it.particulars || '',
-          quantity: q,
-          qty: q,
-          kg: kg,
-          price: p,
-          rate: p,
-          amount: (Number(q) || 0) * (Number(p) || 0)
-        };
-      });
-
-      list.push({
-        id: docSnap.id,
-        billNo: String(data.billNo || ''),
-        customerId: String(data.customerId || ''),
-        date: formatFirestoreDate(data.date),
-        customerName: String(data.customerName || ''),
-        address: String(data.address || ''),
-        items: mappedItems,
-        quantity: Number(data.quantity) || mappedItems.reduce((acc, it) => acc + (Number(it.quantity) || 0), 0),
-        price: Number(data.price) || (mappedItems.length > 0 ? Number(mappedItems[0].price) || 0 : 0),
-        previousBalance: prevBal,
-        prevBalance: prevBal,
-        advance: adv,
-        receipt: adv,
-        totalAmount: Number(data.totalAmount) || 0,
-        finalBalance: Number(data.finalBalance) || 0,
-        createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : data.createdAt
-      });
-    });
-
-    // Check if this device has local bills that need to be uploaded to Firestore
-    const localBills = getLocalBills();
-    if (Array.isArray(localBills) && localBills.length > 0) {
-      const cloudBillKeys = new Set(list.map(b => `${b.billNo}_${(b.customerName || '').trim()}_${b.totalAmount}`));
-      for (const lb of localBills) {
-        const key = `${lb.billNo}_${(lb.customerName || '').trim()}_${lb.totalAmount}`;
-        if (!cloudBillKeys.has(key)) {
-          list.push(lb);
-          // Upload local bill to Firestore so other devices can view it
-          try {
-            await uploadBillToFirestore(lb);
-            cloudBillKeys.add(key);
-            console.log('[Sync] Uploaded local bill to cloud:', key);
-          } catch (syncErr) {
-            console.warn('[Sync] Could not upload bill to cloud:', syncErr);
-          }
-        }
-      }
-    }
-
-    if (list.length > 0) {
-      list.sort((a, b) => {
-        const customerCompare = `${a.customerName} - ${a.address}`.localeCompare(`${b.customerName} - ${b.address}`);
-        return customerCompare
-          || String(a.customerId || '').localeCompare(String(b.customerId || ''))
-          || (Number(a.billNo) || 0) - (Number(b.billNo) || 0);
-      });
-      saveLocalBills(list);
-      return list;
-    }
-  } catch (firebaseErr) {
-    console.warn('[Firebase] Firestore getBills fallback:', firebaseErr);
-  }
-
-  // 2. Try Node Backend
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch(`${API_BASE_URL}/bills`, { signal: controller.signal });
-    clearTimeout(timeoutId);
-
+    const res = await withTimeout(fetch(`${API_BASE_URL}/bills`), 8000);
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         const backendList: SavedBill[] = data.map((b: any) => {
           const adv = b.advance !== undefined ? b.advance : (b.receipt !== undefined ? b.receipt : '');
           const prevBal = b.previousBalance !== undefined ? b.previousBalance : (b.prevBalance !== undefined ? b.prevBalance : '');
           const mappedItems: BillItem[] = (Array.isArray(b.items) ? b.items : []).map((it: any) => ({
-            id: it.id || it.frontendId,
-            frontendId: it.frontendId || String(it.id || ''),
-            particulars: it.particulars || '',
+            id: it.id || it.frontendId || it._id,
+            frontendId: String(it.frontendId || it.id || it._id || ''),
+            particulars: String(it.particulars || ''),
             quantity: it.quantity !== undefined ? it.quantity : (it.qty !== undefined ? it.qty : ''),
             qty: it.quantity !== undefined ? it.quantity : (it.qty !== undefined ? it.qty : ''),
-            kg: it.kg !== undefined ? it.kg : '',
+            kg: String(it.kg ?? ''),
             price: it.price !== undefined ? it.price : (it.rate !== undefined ? it.rate : ''),
             rate: it.price !== undefined ? it.price : (it.rate !== undefined ? it.rate : ''),
             amount: (Number(it.quantity ?? it.qty) || 0) * (Number(it.price ?? it.rate) || 0)
           }));
 
           return {
-            id: b.id,
+            id: b.id || b._id,
             billNo: String(b.billNo || ''),
             customerId: String(b.customerId || ''),
-            date: formatFirestoreDate(b.date),
+            date: formatDateToDMY(String(b.date || '')),
             customerName: String(b.customerName || ''),
             address: String(b.address || ''),
             items: mappedItems,
-            quantity: Number(b.quantity) || 0,
-            price: Number(b.price) || 0,
+            quantity: Number(b.quantity) || mappedItems.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0),
+            price: Number(b.price) || (mappedItems.length > 0 ? Number(mappedItems[0].price) || 0 : 0),
             previousBalance: prevBal,
             prevBalance: prevBal,
             advance: adv,
@@ -731,12 +370,37 @@ export const getBills = async (): Promise<SavedBill[]> => {
           };
         });
 
+        // Also merge any offline bills that haven't reached the server
+        const localBills = getLocalBills();
+        if (Array.isArray(localBills) && localBills.length > 0) {
+          const serverKeys = new Set(backendList.map(b => `${b.billNo}_${(b.customerName || '').trim()}_${b.totalAmount}`));
+          for (const lb of localBills) {
+            const key = `${lb.billNo}_${(lb.customerName || '').trim()}_${lb.totalAmount}`;
+            if (!serverKeys.has(key)) {
+              backendList.push(lb);
+              // Non-blocking sync to backend
+              fetch(`${API_BASE_URL}/bills`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(lb)
+              }).catch(() => {});
+            }
+          }
+        }
+
+        backendList.sort((a, b) => {
+          const customerCompare = `${a.customerName} - ${a.address}`.localeCompare(`${b.customerName} - ${b.address}`);
+          return customerCompare
+            || String(a.customerId || '').localeCompare(String(b.customerId || ''))
+            || (Number(a.billNo) || 0) - (Number(b.billNo) || 0);
+        });
+
         saveLocalBills(backendList);
         return backendList;
       }
     }
-  } catch {
-    // ignore
+  } catch (err) {
+    console.warn('[API] Could not fetch bills from backend:', err);
   }
 
   return getLocalBills();
@@ -744,20 +408,6 @@ export const getBills = async (): Promise<SavedBill[]> => {
 
 export const getNextBillNo = async (customerId?: string): Promise<number> => {
   if (!customerId) return 1;
-  try {
-    const customerRef = doc(db, 'customers', customerId);
-    const customerSnapshot = await withTimeout(getDoc(customerRef), 2000);
-    if (customerSnapshot.exists()) {
-      const data = customerSnapshot.data();
-      if (Number.isInteger(data.lastBillNo) && data.lastBillNo >= 0) {
-        return data.lastBillNo + 1;
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  // Derive locally from existing bills for this customer
   try {
     const localBills = getLocalBills();
     const customerBills = localBills.filter(b => b.customerId === customerId);
@@ -795,88 +445,61 @@ export const createBill = async (bill: SavedBill): Promise<SavedBill> => {
 
   const totalQty = mappedItems.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
   const avgPrice = mappedItems.length > 0 ? (Number(mappedItems[0].price) || 0) : 0;
-
   const totalAmount = Number(bill.totalAmount) || 0;
   const advance = Number(adv) || 0;
   const finalBalance = totalAmount - advance;
 
-  // Use user-provided bill number
   const billNoNum = Number(bill.billNo) || 1;
   const billNoStr = String(bill.billNo || billNoNum);
 
-  let savedId = 'bill_' + Date.now();
-
-  // Try saving to Firebase Firestore
-  try {
-    const billRef = doc(collection(db, 'bills'));
-    savedId = billRef.id;
-    const date = Timestamp.fromDate(parseBillDate(String(bill.date)));
-    const payload = {
-      billNo: billNoNum,
-      customerId,
-      date,
-      customerName: String(bill.customerName || '').trim(),
-      address: String(bill.address || '').trim(),
-      quantity: totalQty,
-      price: avgPrice,
-      items: mappedItems,
-      previousBalance: String(prevBal || '0'),
-      prevBalance: String(prevBal || '0'),
-      advance,
-      receipt: advance,
-      totalAmount,
-      finalBalance,
-      createdAt: Timestamp.now()
-    };
-
-    // Save directly to Firestore collection
-    await setDoc(billRef, payload);
-
-    try {
-      const customerRef = doc(db, 'customers', customerId);
-      const customerSnapshot = await getDoc(customerRef);
-      if (customerSnapshot.exists()) {
-        await updateDoc(customerRef, {
-          lastBillNo: billNoNum,
-          balance: finalBalance,
-          updatedAt: new Date().toISOString()
-        });
-      }
-    } catch {
-      // non-blocking customer balance update
-    }
-  } catch (firebaseErr) {
-    console.warn('[Firebase] Firestore createBill fallback to local:', firebaseErr);
-  }
-
-  // Always save to local backup
-  const localBill: SavedBill = {
-    ...bill,
-    id: savedId,
+  const payload = {
     customerId,
     billNo: billNoStr,
     date: formatDateToDMY(String(bill.date)),
+    customerName: String(bill.customerName || '').trim(),
+    address: String(bill.address || '').trim(),
+    items: mappedItems,
+    quantity: totalQty,
+    price: avgPrice,
+    previousBalance: String(prevBal || '0'),
+    prevBalance: String(prevBal || '0'),
     advance,
+    receipt: advance,
     totalAmount,
     finalBalance,
     createdAt: new Date().toISOString()
   };
+
+  let savedBill: SavedBill = {
+    ...payload,
+    id: 'bill_' + Date.now()
+  };
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/bills`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      savedBill = {
+        ...savedBill,
+        id: data.id || data._id || savedBill.id,
+        billNo: String(data.billNo || savedBill.billNo)
+      };
+    }
+  } catch (err) {
+    console.warn('[API] createBill saved locally (backend offline):', err);
+  }
+
+  // Always update local storage
   const currentBills = getLocalBills();
-  saveLocalBills([localBill, ...currentBills.filter(existing => existing.id !== localBill.id)]);
-  return localBill;
+  saveLocalBills([savedBill, ...currentBills.filter(existing => existing.id !== savedBill.id)]);
+  return savedBill;
 };
 
 export const deleteBill = async (id?: number | string, billNo?: string): Promise<void> => {
-  // 1. Try Firebase Firestore
-  try {
-    if (id && typeof id === 'string' && isNaN(Number(id))) {
-      await deleteDoc(doc(db, 'bills', id));
-    }
-  } catch (firebaseErr) {
-    console.warn('[Firebase] Firestore deleteBill fallback:', firebaseErr);
-  }
-
-  // 2. Try Node Backend
   const targetId = id || billNo;
   if (targetId) {
     try {
@@ -886,7 +509,6 @@ export const deleteBill = async (id?: number | string, billNo?: string): Promise
     }
   }
 
-  // 3. Local Storage update
   const currentBills = getLocalBills();
   const safeBills = Array.isArray(currentBills) ? currentBills : [];
   saveLocalBills(safeBills.filter(b => {

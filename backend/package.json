@@ -1,24 +1,23 @@
 {
   "name": "billing-backend",
   "version": "1.0.0",
-  "description": "Node.js & Firebase Backend API for KKM Sea Foodz Billing System",
+  "description": "Node.js & MongoDB Atlas Backend API for KKM Sea Foodz Billing System",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "build": "tsc",
-    "seed": "tsx src/seed.ts",
-    "migrate:bill-numbers": "tsx src/migrateBillNumbers.ts"
+    "seed": "tsx src/seed.ts"
   },
-  "keywords": ["billing", "firebase", "express", "nodejs", "firestore"],
+  "keywords": ["billing", "mongodb", "mongoose", "express", "nodejs", "atlas"],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "firebase-admin": "^13.1.0"
+    "mongoose": "^8.9.5"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

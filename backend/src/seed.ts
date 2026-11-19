@@ -1,33 +1,27 @@
-import { initializeFirebase, getDb } from './firebase.js';
+import { connectDB, isDbConnected } from './db.js';
+import { Customer } from './models/Customer.js';
 import { DEFAULT_INITIAL_CUSTOMERS } from './routes/customers.js';
 
 async function seed() {
-  console.log('Seeding initial customers to Firebase Firestore...');
-  const status = initializeFirebase();
-  const db = getDb();
+  console.log('Seeding initial customers to MongoDB Atlas...');
+  await connectDB();
 
-  if (!status.isConnected || !db) {
-    console.error('Firebase is not connected! Please provide Firebase credentials before running seed.');
+  if (!isDbConnected()) {
+    console.error('MongoDB Atlas is not connected! Please provide MONGODB_URI in backend/.env before running seed.');
     process.exit(1);
   }
 
   try {
-    const batch = db.batch();
-    for (const customer of DEFAULT_INITIAL_CUSTOMERS) {
-      const docRef = db.collection('customers').doc();
-      batch.set(docRef, {
-        ...customer,
-        lastBillNo: 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
-      console.log(`Added customer to batch: ${customer.name} (${customer.address})`);
-    }
-
-    await batch.commit();
-    console.log(`✅ Successfully seeded ${DEFAULT_INITIAL_CUSTOMERS.length} customers to Firebase Firestore!`);
+    await Customer.deleteMany({});
+    const seeded = await Customer.insertMany(DEFAULT_INITIAL_CUSTOMERS.map(customer => ({
+      ...customer,
+      lastBillNo: 0
+    })));
+    console.log(`✅ Successfully seeded ${seeded.length} customers to MongoDB Atlas!`);
+    process.exit(0);
   } catch (err: any) {
     console.error('Error seeding customers:', err.message);
+    process.exit(1);
   }
 }
 

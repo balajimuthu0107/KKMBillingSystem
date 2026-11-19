@@ -119,6 +119,62 @@ function App() {
   }, []);
 
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historySearch, setHistorySearch] = useState('');
+
+  const handleWhatsAppShare = () => {
+    if (!customerName.trim()) {
+      alert("Please select or enter a Customer Name before sharing!");
+      return;
+    }
+    const lines = [
+      `*🐟 KKM SEA FOODZ - BILL*`,
+      `*Bill No:* ${billNo}`,
+      `*Date:* ${date}`,
+      `*Customer:* ${customerName}${address ? ' - ' + address : ''}`,
+      `-----------------------------`,
+      ...items.filter(it => it.particulars && (it.qty || it.quantity)).map((it, idx) => {
+        const q = it.quantity !== undefined && it.quantity !== '' ? it.quantity : (it.qty ?? '');
+        const r = it.price !== undefined && it.price !== '' ? it.price : (it.rate ?? '');
+        const amt = (Number(q) || 0) * (Number(r) || 0);
+        return `${idx + 1}. ${it.particulars}: ${q} Box × Rs.${r} = Rs.${formatCurrency(amt)}`;
+      }),
+      `-----------------------------`,
+      `*Current Total:* Rs.${formatCurrency(currentTotal)}`,
+      ...(Number(prevBalance) ? [`*Old Balance (முன் பாக்கி):* Rs.${formatCurrency(Number(prevBalance))}`] : []),
+      `*Total Amount:* Rs.${formatCurrency(subTotal)}`,
+      ...(Number(advance) ? [`*Advance (வரவு):* Rs.${formatCurrency(Number(advance))}`] : []),
+      `*Final Balance (மீதி பாக்கி):* Rs.${formatCurrency(finalBalance)}`,
+      `-----------------------------`,
+      `_நன்றி! மீண்டும் வருக!_`
+    ];
+    const text = encodeURIComponent(lines.join('\n'));
+    window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
+  };
+
+  const handleExportCSV = () => {
+    if (savedBills.length === 0) {
+      alert("No bills to export!");
+      return;
+    }
+    const headers = ["Bill No", "Date", "Customer Name", "Address", "Total Amount", "Advance", "Final Balance"];
+    const rows = savedBills.map(b => [
+      `"${b.billNo}"`,
+      `"${formatDisplayDate(b.date)}"`,
+      `"${(b.customerName || '').replace(/"/g, '""')}"`,
+      `"${(b.address || '').replace(/"/g, '""')}"`,
+      b.totalAmount,
+      b.advance !== undefined ? b.advance : (b.receipt || 0),
+      b.finalBalance
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `KKM_Bills_${getTodayDate()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -663,7 +719,8 @@ function App() {
           <button className="btn" style={{ backgroundColor: '#0d6efd', color: 'white' }} onClick={handleSaveBill}>💾 Save & Next Bill</button>
           <button className="btn" style={{ backgroundColor: '#198754', color: 'white' }} onClick={handlePrint}>🖨️ Print / PDF</button>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '2rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginBottom: '2rem' }}>
+          <button className="btn" style={{ backgroundColor: '#25D366', color: 'white', fontWeight: 'bold' }} onClick={handleWhatsAppShare} title="Share Bill on WhatsApp">💬 WhatsApp</button>
           <button className="btn" style={{ backgroundColor: '#6f42c1', color: 'white' }} onClick={handleDownloadImage}>⬇️ Download Image</button>
           <button className="btn" style={{ backgroundColor: '#dc3545', color: 'white' }} onClick={handleRefreshBill}>🔄 Refresh Bill</button>
         </div>
@@ -676,9 +733,29 @@ function App() {
           backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
         }}>
           <div className="card no-print" style={{ width: '90%', maxWidth: '800px', maxHeight: '80vh', overflowY: 'auto', backgroundColor: '#fff', border: '2px solid #0b4b8a' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '8px' }}>
               <h2 style={{ margin: 0, color: '#0b4b8a', borderBottom: 'none' }}>📜 Previous Bills History</h2>
-              <button className="btn btn-danger" onClick={() => setShowHistoryModal(false)}>Close</button>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button
+                  className="btn"
+                  style={{ backgroundColor: '#198754', color: '#fff', fontSize: '13px', padding: '6px 12px' }}
+                  onClick={handleExportCSV}
+                  title="Export all bills to Excel CSV"
+                >
+                  📊 Export Excel / CSV
+                </button>
+                <button className="btn btn-danger" style={{ padding: '6px 12px' }} onClick={() => setShowHistoryModal(false)}>Close</button>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '1rem' }}>
+              <input
+                type="text"
+                placeholder="🔍 Search by Customer Name, Bill No, or Date..."
+                value={historySearch}
+                onChange={e => setHistorySearch(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '14px' }}
+              />
             </div>
 
             {savedBills.length === 0 ? (
@@ -697,7 +774,14 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {savedBills.slice().sort((a, b) => {
+                  {savedBills.filter(bill => {
+                    if (!historySearch.trim()) return true;
+                    const q = historySearch.trim().toLowerCase();
+                    return String(bill.billNo || '').toLowerCase().includes(q)
+                      || (bill.customerName || '').toLowerCase().includes(q)
+                      || (bill.address || '').toLowerCase().includes(q)
+                      || (bill.date || '').toLowerCase().includes(q);
+                  }).slice().sort((a, b) => {
                     const customerCompare = `${a.customerName} - ${a.address}`.localeCompare(`${b.customerName} - ${b.address}`);
                     return customerCompare
                       || String(a.customerId || '').localeCompare(String(b.customerId || ''))

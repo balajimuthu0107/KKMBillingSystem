@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
-import { getDb, isFirebaseConnected } from '../firebase.js';
+import { Customer } from '../models/Customer.js';
+import { isDbConnected } from '../db.js';
 
 export interface CustomerData {
   id: string | number;
@@ -10,7 +11,7 @@ export interface CustomerData {
   updatedAt?: string;
 }
 
-export const DEFAULT_INITIAL_CUSTOMERS: Omit<CustomerData, 'id'>[] = [
+export const DEFAULT_INITIAL_CUSTOMERS = [
   { name: "Pachaippan", address: "KKM", balance: 0 },
   { name: "SRS", address: "விழுப்புரம்", balance: 0 },
   { name: "SRS சிவராஜ்", address: "விழுப்புரம்", balance: 0 },
@@ -29,7 +30,7 @@ export const DEFAULT_INITIAL_CUSTOMERS: Omit<CustomerData, 'id'>[] = [
 // Fallback in-memory customer storage
 let memoryCustomers: CustomerData[] = DEFAULT_INITIAL_CUSTOMERS.map((c, i) => ({
   ...c,
-  id: i + 1,
+  id: String(i + 1),
   updatedAt: new Date().toISOString()
 }));
 
@@ -38,50 +39,41 @@ const router = Router();
 // GET all customers
 router.get('/', async (_req: Request, res: Response) => {
   try {
-    const db = getDb();
-    if (isFirebaseConnected() && db) {
-      const snapshot = await db.collection('customers').get();
-      if (snapshot.empty) {
+    if (isDbConnected()) {
+      let customers = await Customer.find().sort({ name: 1 });
+      if (customers.length === 0) {
         // Auto-seed default customers if collection is empty
-        const batch = db.batch();
-        const seeded: CustomerData[] = [];
-        for (const c of DEFAULT_INITIAL_CUSTOMERS) {
-          const docRef = db.collection('customers').doc();
-          const docData = {
-            name: c.name,
-            address: c.address,
-            balance: c.balance,
-            lastBillNo: 0,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          };
-          batch.set(docRef, docData);
-          seeded.push({ id: docRef.id, ...docData });
-        }
-        await batch.commit();
-        return res.json(seeded);
+        await Customer.insertMany(DEFAULT_INITIAL_CUSTOMERS.map(c => ({
+          ...c,
+          lastBillNo: 0
+        })));
+        customers = await Customer.find().sort({ name: 1 });
       }
-
-      const customers: CustomerData[] = [];
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        customers.push({
-          id: doc.id,
-          name: data.name || '',
-          address: data.address || '',
-          balance: Number(data.balance) || 0,
-          lastBillNo: Number(data.lastBillNo) || 0,
-          updatedAt: data.updatedAt
-        });
-      });
       return res.json(customers);
     }
 
-    // Fallback mode
     return res.json(memoryCustomers);
   } catch (err: any) {
     console.error('Error in GET /api/customers:', err);
     return res.status(500).json({ error: err.message, fallback: memoryCustomers });
+  }
+});
+
+// GET customer by ID
+router.get('/:id', async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id;
+    if (isDbConnected()) {
+      const customer = await Customer.findById(id);
+      if (!customer) return res.status(404).json({ error: 'Customer not found' });
+      return res.json(customer);
+    }
+
+    const found = memoryCustomers.find(c => String(c.id) === id);
+    if (!found) return res.status(404).json({ error: 'Customer not found' });
+    return res.json(found);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -93,66 +85,28 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Customer name is required' });
     }
 
+    const cleanName = name.trim();
+    const cleanAddress = String(address).trim();
     const cleanBalance = Number(balance) || 0;
-    const now = new Date().toISOString();
-    const db = getDb();
 
-    if (isFirebaseConnected() && db) {
-      // Check if customer already exists with this name & address
-      const existingSnap = await db.collection('customers')
-        .where('name', '==', name.trim())
-        .where('address', '==', address.trim())
-        .limit(1)
-        .get();
-
-      if (!existingSnap.empty) {
-        const existingDoc = existingSnap.docs[0];
-        const updatedData = {
-          name: name.trim(),
-          address: address.trim(),
-          balance: cleanBalance,
-          lastBillNo: Number(existingDoc.data().lastBillNo) || 0,
-          updatedAt: now
-        };
-        await existingDoc.ref.update(updatedData);
-        return res.json({ id: existingDoc.id, ...updatedData });
-      }
-
-      const docRef = await db.collection('customers').add({
-        name: name.trim(),
-        address: address.trim(),
+    if (isDbConnected()) {
+      const customer = new Customer({
+        name: cleanName,
+        address: cleanAddress,
         balance: cleanBalance,
-        lastBillNo: 0,
-        createdAt: now,
-        updatedAt: now
+        lastBillNo: 0
       });
-
-      return res.status(201).json({
-        id: docRef.id,
-        name: name.trim(),
-        address: address.trim(),
-        balance: cleanBalance,
-        lastBillNo: 0,
-        updatedAt: now
-      });
-    }
-
-    // Fallback in-memory
-    const existingIdx = memoryCustomers.findIndex(
-      c => c.name === name.trim() && c.address === address.trim()
-    );
-    if (existingIdx >= 0) {
-      memoryCustomers[existingIdx].balance = cleanBalance;
-      memoryCustomers[existingIdx].updatedAt = now;
-      return res.json(memoryCustomers[existingIdx]);
+      await customer.save();
+      return res.status(201).json(customer);
     }
 
     const newCust: CustomerData = {
-      id: Date.now(),
-      name: name.trim(),
-      address: address.trim(),
+      id: String(Date.now()),
+      name: cleanName,
+      address: cleanAddress,
       balance: cleanBalance,
-      updatedAt: now
+      lastBillNo: 0,
+      updatedAt: new Date().toISOString()
     };
     memoryCustomers.push(newCust);
     return res.status(201).json(newCust);
@@ -165,77 +119,30 @@ router.post('/', async (req: Request, res: Response) => {
 // PUT update customer
 router.put('/:id', async (req: Request, res: Response) => {
   try {
-    const id = String(req.params.id);
-    const { name, address, balance } = req.body;
-    const now = new Date().toISOString();
-    const db = getDb();
+    const id = req.params.id;
+    const { name, address, balance, lastBillNo } = req.body;
 
-    if (isFirebaseConnected() && db) {
-      const docRef = db.collection('customers').doc(id);
-      const docSnap = await docRef.get();
+    const updateFields: any = {};
+    if (name !== undefined) updateFields.name = String(name).trim();
+    if (address !== undefined) updateFields.address = String(address).trim();
+    if (balance !== undefined) updateFields.balance = Number(balance) || 0;
+    if (lastBillNo !== undefined) updateFields.lastBillNo = Number(lastBillNo) || 0;
 
-      if (docSnap.exists) {
-        const updatePayload: any = { updatedAt: now };
-        if (name !== undefined) updatePayload.name = name.trim();
-        if (address !== undefined) updatePayload.address = address.trim();
-        if (balance !== undefined) updatePayload.balance = Number(balance) || 0;
-
-        await docRef.update(updatePayload);
-        const updated = (await docRef.get()).data();
-        return res.json({ id: docRef.id, ...updated });
-      } else {
-        // If doc by ID doesn't exist, search by name and address
-        if (name) {
-          const matchSnap = await db.collection('customers')
-            .where('name', '==', name.trim())
-            .where('address', '==', (address || '').trim())
-            .limit(1)
-            .get();
-
-          if (!matchSnap.empty) {
-            const matchedDoc = matchSnap.docs[0];
-            await matchedDoc.ref.update({
-              balance: Number(balance) || 0,
-              updatedAt: now
-            });
-            return res.json({ id: matchedDoc.id, ...matchedDoc.data(), balance: Number(balance) || 0 });
-          }
-        }
-
-        // Create new
-        const newDoc = await db.collection('customers').add({
-          name: name || '',
-          address: address || '',
-          balance: Number(balance) || 0,
-          lastBillNo: 0,
-          createdAt: now,
-          updatedAt: now
-        });
-        return res.json({ id: newDoc.id, name, address, balance: Number(balance) || 0 });
-      }
+    if (isDbConnected()) {
+      const updated = await Customer.findByIdAndUpdate(id, updateFields, { new: true });
+      if (!updated) return res.status(404).json({ error: 'Customer not found' });
+      return res.json(updated);
     }
 
-    // Fallback mode
-    const idx = memoryCustomers.findIndex(c => String(c.id) === String(id) || (name && c.name === name));
-    if (idx >= 0) {
-      if (name !== undefined) memoryCustomers[idx].name = name;
-      if (address !== undefined) memoryCustomers[idx].address = address;
-      if (balance !== undefined) memoryCustomers[idx].balance = Number(balance) || 0;
-      memoryCustomers[idx].updatedAt = now;
-      return res.json(memoryCustomers[idx]);
-    }
-
-    const created: CustomerData = {
-      id: isNaN(Number(id)) ? Date.now() : Number(id),
-      name: name || '',
-      address: address || '',
-      balance: Number(balance) || 0,
-      updatedAt: now
+    const idx = memoryCustomers.findIndex(c => String(c.id) === id);
+    if (idx === -1) return res.status(404).json({ error: 'Customer not found' });
+    memoryCustomers[idx] = {
+      ...memoryCustomers[idx],
+      ...updateFields,
+      updatedAt: new Date().toISOString()
     };
-    memoryCustomers.push(created);
-    return res.json(created);
+    return res.json(memoryCustomers[idx]);
   } catch (err: any) {
-    console.error(`Error in PUT /api/customers/${req.params.id}:`, err);
     return res.status(500).json({ error: err.message });
   }
 });
@@ -243,52 +150,37 @@ router.put('/:id', async (req: Request, res: Response) => {
 // DELETE customer
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
-    const id = String(req.params.id);
-    const db = getDb();
-
-    if (isFirebaseConnected() && db) {
-      await db.collection('customers').doc(id).delete();
-      return res.json({ success: true, message: `Customer ${id} deleted` });
+    const id = req.params.id;
+    if (isDbConnected()) {
+      await Customer.findByIdAndDelete(id);
+      return res.json({ message: 'Customer deleted successfully' });
     }
 
-    memoryCustomers = memoryCustomers.filter(c => String(c.id) !== String(id));
-    return res.json({ success: true, message: `Customer ${id} deleted from local store` });
+    memoryCustomers = memoryCustomers.filter(c => String(c.id) !== id);
+    return res.json({ message: 'Customer deleted from memory' });
   } catch (err: any) {
-    console.error(`Error in DELETE /api/customers/${req.params.id}:`, err);
     return res.status(500).json({ error: err.message });
   }
 });
 
-// Seed endpoint
+// POST seed customers
 router.post('/seed', async (_req: Request, res: Response) => {
   try {
-    const db = getDb();
-    if (isFirebaseConnected() && db) {
-      const batch = db.batch();
-      const seeded: CustomerData[] = [];
-      for (const c of DEFAULT_INITIAL_CUSTOMERS) {
-        const docRef = db.collection('customers').doc();
-        const docData = {
-          name: c.name,
-          address: c.address,
-          balance: c.balance,
-          lastBillNo: 0,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        batch.set(docRef, docData);
-        seeded.push({ id: docRef.id, ...docData });
-      }
-      await batch.commit();
-      return res.json({ success: true, message: 'Seeded default customers to Firebase Firestore', customers: seeded });
+    if (isDbConnected()) {
+      await Customer.deleteMany({});
+      const seeded = await Customer.insertMany(DEFAULT_INITIAL_CUSTOMERS.map(c => ({
+        ...c,
+        lastBillNo: 0
+      })));
+      return res.json({ message: 'Successfully seeded customers in MongoDB Atlas', count: seeded.length });
     }
 
     memoryCustomers = DEFAULT_INITIAL_CUSTOMERS.map((c, i) => ({
       ...c,
-      id: i + 1,
+      id: String(i + 1),
       updatedAt: new Date().toISOString()
     }));
-    return res.json({ success: true, message: 'Seeded customers to local store', customers: memoryCustomers });
+    return res.json({ message: 'Seeded in memory', count: memoryCustomers.length });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }

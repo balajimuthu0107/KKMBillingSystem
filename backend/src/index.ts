@@ -1,15 +1,15 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { initializeFirebase } from './firebase.js';
+import { connectDB, isDbConnected } from './db.js';
 import customerRoutes from './routes/customers.js';
 import billRoutes from './routes/bills.js';
 import healthRoutes from './routes/health.js';
 
 dotenv.config();
 
-// Initialize Firebase Admin
-const firebaseStatus = initializeFirebase();
+// Initialize MongoDB Atlas connection
+connectDB();
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -35,7 +35,10 @@ app.get(['/', '/api'], (_req, res) => {
   res.json({
     name: 'KKM Sea Foodz Billing API',
     version: '1.0.0',
-    firebaseConnected: firebaseStatus.isConnected,
+    database: {
+      provider: 'MongoDB Atlas',
+      connected: isDbConnected()
+    },
     endpoints: {
       health: '/api/health',
       customers: '/api/customers',
@@ -61,8 +64,8 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 app.listen(PORT, () => {
   console.log(`====================================================`);
   console.log(`🚀 KKM Sea Foodz Backend running on http://localhost:${PORT}`);
-  console.log(`🔥 Firebase Status: ${firebaseStatus.isConnected ? 'CONNECTED (' + firebaseStatus.mode + ')' : 'FALLBACK MODE'}`);
-  console.log(`📋 API Docs: http://localhost:${PORT}/`);
+  console.log(`🍃 MongoDB Atlas Status: ${isDbConnected() ? 'CONNECTED' : 'STANDBY / FALLBACK MODE'}`);
+  console.log(`📋 API Docs: http://localhost:${PORT}/api`);
   console.log(`====================================================`);
 });
 
