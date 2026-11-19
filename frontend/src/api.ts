@@ -602,40 +602,6 @@ export const uploadBillToFirestore = async (bill: SavedBill): Promise<string> =>
   return billRef.id;
 };
 
-export const syncAllLocalBillsToFirestore = async (): Promise<{ count: number; error?: string }> => {
-  const localBills = getLocalBills();
-  if (!Array.isArray(localBills) || localBills.length === 0) {
-    return { count: 0 };
-  }
-
-  try {
-    const billsCol = collection(db, 'bills');
-    const snapshot = await withTimeout(getDocs(billsCol), 5000);
-    const cloudBillKeys = new Set<string>();
-    snapshot.forEach(docSnap => {
-      const data = docSnap.data();
-      const num = String(data.billNo || '');
-      const cust = (data.customerName || '').trim();
-      const amt = Number(data.totalAmount) || 0;
-      cloudBillKeys.add(`${num}_${cust}_${amt}`);
-    });
-
-    let uploadedCount = 0;
-    for (const lb of localBills) {
-      const key = `${lb.billNo}_${(lb.customerName || '').trim()}_${lb.totalAmount}`;
-      if (!cloudBillKeys.has(key)) {
-        await uploadBillToFirestore(lb);
-        cloudBillKeys.add(key);
-        uploadedCount++;
-      }
-    }
-    return { count: uploadedCount };
-  } catch (err: any) {
-    console.error('syncAllLocalBillsToFirestore error:', err);
-    return { count: 0, error: err?.message || 'Failed to connect to Firebase Firestore' };
-  }
-};
-
 export const getBills = async (): Promise<SavedBill[]> => {
   let list: SavedBill[] = [];
 
