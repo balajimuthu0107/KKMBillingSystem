@@ -11,7 +11,6 @@ import {
   query, 
   where, 
   writeBatch,
-  runTransaction,
   Timestamp
 } from 'firebase/firestore';
 
@@ -142,7 +141,7 @@ export const DEFAULT_INITIAL_CUSTOMERS: CustomerData[] = [
 ];
 
 // Helper to prevent Firestore from hanging indefinitely if offline
-const withTimeout = <T>(promise: Promise<T>, ms = 3500): Promise<T> => {
+const withTimeout = <T>(promise: Promise<T>, ms = 15000): Promise<T> => {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Firestore operation timed out')), ms))
@@ -557,18 +556,19 @@ export const uploadBillToFirestore = async (bill: SavedBill): Promise<string> =>
 
   const billNoNum = Number(bill.billNo) || 1;
   const adv = bill.advance !== undefined && bill.advance !== '' ? Number(bill.advance) : (bill.receipt !== undefined ? Number(bill.receipt) : 0);
-  const prevBal = bill.previousBalance !== undefined && bill.previousBalance !== '' ? String(bill.previousBalance) : String(bill.prevBalance ?? '');
+  const prevBal = bill.previousBalance !== undefined && bill.previousBalance !== '' ? String(bill.previousBalance) : String(bill.prevBalance ?? '0');
   
-  const mappedItems: BillItem[] = (bill.items || []).map(item => {
+  const mappedItems: BillItem[] = (Array.isArray(bill.items) ? bill.items : []).map(item => {
     const q = item.quantity !== undefined && item.quantity !== '' ? item.quantity : (item.qty ?? '');
     const p = item.price !== undefined && item.price !== '' ? item.price : (item.rate ?? '');
     const kg = item.kg !== undefined ? item.kg : '';
     return {
-      frontendId: item.id?.toString(),
-      particulars: item.particulars || '',
+      id: String(item.id || item.frontendId || ''),
+      frontendId: String(item.id || item.frontendId || ''),
+      particulars: String(item.particulars || ''),
       quantity: q,
       qty: q,
-      kg: kg,
+      kg: String(kg),
       price: p,
       rate: p,
       amount: (Number(q) || 0) * (Number(p) || 0)
@@ -583,14 +583,14 @@ export const uploadBillToFirestore = async (bill: SavedBill): Promise<string> =>
   const payload = {
     billNo: billNoNum,
     customerId: String(bill.customerId || ''),
-    customerName: (bill.customerName || '').trim(),
-    address: (bill.address || '').trim(),
+    customerName: String(bill.customerName || '').trim(),
+    address: String(bill.address || '').trim(),
     date: Timestamp.fromDate(billDate),
     quantity: totalQty,
     price: avgPrice,
     items: mappedItems,
-    previousBalance: prevBal,
-    prevBalance: prevBal,
+    previousBalance: String(prevBal),
+    prevBalance: String(prevBal),
     advance: adv,
     receipt: adv,
     totalAmount,
@@ -608,7 +608,7 @@ export const getBills = async (): Promise<SavedBill[]> => {
   // 1. Try Firebase Firestore with resilient in-memory ordering
   try {
     const billsCol = collection(db, 'bills');
-    const snapshot = await withTimeout(getDocs(billsCol), 4000);
+    const snapshot = await withTimeout(getDocs(billsCol), 15000);
     snapshot.forEach(docSnap => {
       const data = docSnap.data();
       const adv = data.advance !== undefined ? data.advance : (data.receipt !== undefined ? data.receipt : '');
@@ -655,13 +655,19 @@ export const getBills = async (): Promise<SavedBill[]> => {
     // Check if this device has local bills that need to be uploaded to Firestore
     const localBills = getLocalBills();
     if (Array.isArray(localBills) && localBills.length > 0) {
-      const cloudBillKeys = new Set(list.map(b => `${b.billNo}_${b.customerName}_${b.totalAmount}`));
+      const cloudBillKeys = new Set(list.map(b => `${b.billNo}_${(b.customerName || '').trim()}_${b.totalAmount}`));
       for (const lb of localBills) {
-        const key = `${lb.billNo}_${lb.customerName}_${lb.totalAmount}`;
+        const key = `${lb.billNo}_${(lb.customerName || '').trim()}_${lb.totalAmount}`;
         if (!cloudBillKeys.has(key)) {
           list.push(lb);
           // Upload local bill to Firestore so other devices can view it
-          uploadBillToFirestore(lb).catch(() => {});
+          try {
+            await uploadBillToFirestore(lb);
+            cloudBillKeys.add(key);
+            console.log('[Sync] Uploaded local bill to cloud:', key);
+          } catch (syncErr) {
+            console.warn('[Sync] Could not upload bill to cloud:', syncErr);
+          }
         }
       }
     }
@@ -770,16 +776,17 @@ export const createBill = async (bill: SavedBill): Promise<SavedBill> => {
   const prevBal = bill.previousBalance !== undefined && bill.previousBalance !== '' ? bill.previousBalance : (bill.prevBalance ?? '');
   const customerId = String(bill.customerId || 'local_' + Date.now());
 
-  const mappedItems: BillItem[] = bill.items.map(item => {
+  const mappedItems: BillItem[] = (bill.items || []).map(item => {
     const q = item.quantity !== undefined && item.quantity !== '' ? item.quantity : (item.qty ?? '');
     const p = item.price !== undefined && item.price !== '' ? item.price : (item.rate ?? '');
     const kg = item.kg !== undefined ? item.kg : '';
     return {
-      frontendId: item.id?.toString(),
-      particulars: item.particulars,
+      id: String(item.id || item.frontendId || ''),
+      frontendId: String(item.id || item.frontendId || ''),
+      particulars: String(item.particulars || ''),
       quantity: q,
       qty: q,
-      kg: kg,
+      kg: String(kg),
       price: p,
       rate: p,
       amount: (Number(q) || 0) * (Number(p) || 0)
@@ -808,13 +815,13 @@ export const createBill = async (bill: SavedBill): Promise<SavedBill> => {
       billNo: billNoNum,
       customerId,
       date,
-      customerName: bill.customerName.trim(),
-      address: (bill.address || '').trim(),
+      customerName: String(bill.customerName || '').trim(),
+      address: String(bill.address || '').trim(),
       quantity: totalQty,
       price: avgPrice,
       items: mappedItems,
-      previousBalance: String(prevBal),
-      prevBalance: String(prevBal),
+      previousBalance: String(prevBal || '0'),
+      prevBalance: String(prevBal || '0'),
       advance,
       receipt: advance,
       totalAmount,
@@ -822,21 +829,21 @@ export const createBill = async (bill: SavedBill): Promise<SavedBill> => {
       createdAt: Timestamp.now()
     };
 
+    // Save directly to Firestore collection
+    await setDoc(billRef, payload);
+
     try {
       const customerRef = doc(db, 'customers', customerId);
-      await runTransaction(db, async transaction => {
-        const customerSnapshot = await transaction.get(customerRef);
-        if (customerSnapshot.exists()) {
-          transaction.update(customerRef, {
-            lastBillNo: billNoNum,
-            balance: finalBalance,
-            updatedAt: new Date().toISOString()
-          });
-        }
-        transaction.set(billRef, payload);
-      });
+      const customerSnapshot = await getDoc(customerRef);
+      if (customerSnapshot.exists()) {
+        await updateDoc(customerRef, {
+          lastBillNo: billNoNum,
+          balance: finalBalance,
+          updatedAt: new Date().toISOString()
+        });
+      }
     } catch {
-      await setDoc(billRef, payload);
+      // non-blocking customer balance update
     }
   } catch (firebaseErr) {
     console.warn('[Firebase] Firestore createBill fallback to local:', firebaseErr);
