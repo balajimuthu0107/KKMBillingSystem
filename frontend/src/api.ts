@@ -123,21 +123,30 @@ const parseBillDate = (dateStr: string): Date => {
   return date;
 };
 
-// Default initial customers list (Tamil)
+// Default initial customers list (Tamil & English) - 13 Unique Customers
 export const DEFAULT_INITIAL_CUSTOMERS: CustomerData[] = [
-  { id: 1, name: "பச்சையப்பன்", address: "கந்தம்பாளையம்", balance: 0 },
-  { id: 2, name: "முருகன்", address: "வேட்டவலம்", balance: 0 },
-  { id: 3, name: "ஹரிதாஸ்", address: "வேட்டவலம்", balance: 0 },
-  { id: 4, name: "முரளி", address: "வேட்டவலம்", balance: 0 },
-  { id: 5, name: "பெருமாள்", address: "கண்டாச்சிபுரம்", balance: 0 },
-  { id: 6, name: "கோபி", address: "கண்டாச்சிபுரம்", balance: 0 },
-  { id: 7, name: "முரளி", address: "கண்டாச்சிபுரம்", balance: 0 },
-  { id: 8, name: "ராஜா", address: "கண்டாச்சிபுரம்", balance: 0 },
-  { id: 9, name: "ஏழுமலை", address: "கண்டாச்சிபுரம்", balance: 0 },
-  { id: 10, name: "சுரேஷ்", address: "உளுந்தூர்பேட்டை", balance: 0 },
-  { id: 11, name: "விஜி", address: "விருத்தாச்சலம்", balance: 0 },
-  { id: 12, name: "SRS சிவராஜ்", address: "விழுப்புரம்", balance: 0 }
+  { id: 1, name: "Pachaippan", address: "KKM", balance: 0 },
+  { id: 2, name: "SRS", address: "விழுப்புரம்", balance: 0 },
+  { id: 3, name: "SRS சிவராஜ்", address: "விழுப்புரம்", balance: 0 },
+  { id: 4, name: "ஏழுமலை", address: "கண்டாச்சிபுரம்", balance: 0 },
+  { id: 5, name: "கோபி", address: "கண்டாச்சிபுரம்", balance: 0 },
+  { id: 6, name: "சுரேஷ்", address: "உளுந்தூர்பேட்டை", balance: 0 },
+  { id: 7, name: "பச்சையப்பன்", address: "கந்தம்பாளையம்", balance: 0 },
+  { id: 8, name: "பெருமாள்", address: "கண்டாச்சிபுரம்", balance: 0 },
+  { id: 9, name: "முரளி", address: "வேட்டவலம்", balance: 0 },
+  { id: 10, name: "முருகன்", address: "வேட்டவலம்", balance: 0 },
+  { id: 11, name: "ராஜா", address: "கண்டாச்சிபுரம்", balance: 0 },
+  { id: 12, name: "விஜி", address: "விருத்தாச்சலம்", balance: 0 },
+  { id: 13, name: "ஹரிதாஸ்", address: "வேட்டவலம்", balance: 0 }
 ];
+
+// Helper to prevent Firestore from hanging indefinitely if offline
+const withTimeout = <T>(promise: Promise<T>, ms = 3500): Promise<T> => {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Firestore operation timed out')), ms))
+  ]);
+};
 
 // Local storage backup helpers
 export const getLocalBills = (): SavedBill[] => {
@@ -218,30 +227,43 @@ export const saveLocalBills = (bills: SavedBill[]) => {
 export const getLocalCustomers = (): CustomerData[] => {
   try {
     const raw = localStorage.getItem('kkm_customers');
-    if (!raw) {
-      saveLocalCustomers(DEFAULT_INITIAL_CUSTOMERS);
-      return [...DEFAULT_INITIAL_CUSTOMERS];
-    }
-    const parsed = JSON.parse(raw);
     let list: CustomerData[] = [];
-    if (Array.isArray(parsed)) {
-      list = parsed;
-    } else if (parsed && typeof parsed === 'object') {
-      list = Object.values(parsed).filter((c: any) => c && typeof c === 'object' && c.name) as CustomerData[];
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          list = parsed.filter(c => c && typeof c === 'object' && c.name);
+        }
+      } catch {
+        list = [];
+      }
+    }
+
+    if (list.length === 0) {
+      list = [...DEFAULT_INITIAL_CUSTOMERS];
+      saveLocalCustomers(list);
+      return list;
     }
 
     // Ensure all default initial customers are present in cached list
-    let modified = false;
     for (const def of DEFAULT_INITIAL_CUSTOMERS) {
-      if (!list.some(c => c.name === def.name && c.address === def.address)) {
+      if (!list.some(c => c && c.name && c.name.trim().toLowerCase() === def.name.trim().toLowerCase())) {
         list.push({ ...def, id: def.id || Date.now() });
-        modified = true;
       }
     }
-    if (modified) {
-      saveLocalCustomers(list);
-    }
-    return list.length > 0 ? list : [...DEFAULT_INITIAL_CUSTOMERS];
+
+    // Deduplicate any repeated customer names
+    const seen = new Set<string>();
+    const deduplicated = list.filter(c => {
+      if (!c || !c.name) return false;
+      const key = c.name.trim().toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    saveLocalCustomers(deduplicated);
+    return deduplicated.length > 0 ? deduplicated : [...DEFAULT_INITIAL_CUSTOMERS];
   } catch {
     return [...DEFAULT_INITIAL_CUSTOMERS];
   }
@@ -268,7 +290,7 @@ export const getCustomers = async (): Promise<CustomerData[]> => {
   // 1. Try Firebase Firestore
   try {
     const customersCol = collection(db, 'customers');
-    const snapshot = await getDocs(customersCol);
+    const snapshot = await withTimeout(getDocs(customersCol), 3500);
     if (!snapshot.empty) {
       const customers: CustomerData[] = [];
       snapshot.forEach(docSnap => {
@@ -283,7 +305,39 @@ export const getCustomers = async (): Promise<CustomerData[]> => {
           lastBillNo: Number(data.lastBillNo) || 0
         });
       });
-      const list = customers;
+
+      // Automatically include any missing DEFAULT_INITIAL_CUSTOMERS
+      for (const def of DEFAULT_INITIAL_CUSTOMERS) {
+        const exists = customers.some(c => 
+          c.name.trim().toLowerCase() === def.name.trim().toLowerCase()
+        );
+        if (!exists) {
+          customers.push({
+            id: String(def.id || Date.now()),
+            name: def.name,
+            address: def.address,
+            balance: def.balance,
+            lastBillNo: 0
+          });
+          // Non-blocking sync to Firestore
+          addDoc(collection(db, 'customers'), {
+            name: def.name,
+            address: def.address,
+            balance: def.balance,
+            lastBillNo: 0,
+            createdAt: new Date().toISOString()
+          }).catch(() => {});
+        }
+      }
+
+      // Deduplicate any repeated customer names
+      const seen = new Set<string>();
+      const list = customers.filter(c => {
+        const key = (c.name || '').trim().toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
       saveLocalCustomers(list);
       return list;
     } else {
@@ -495,7 +549,7 @@ export const getBills = async (): Promise<SavedBill[]> => {
   // 1. Try Firebase Firestore with resilient in-memory ordering
   try {
     const billsCol = collection(db, 'bills');
-    const snapshot = await getDocs(billsCol);
+    const snapshot = await withTimeout(getDocs(billsCol), 3500);
     if (!snapshot.empty) {
       const list: SavedBill[] = [];
       snapshot.forEach(docSnap => {
@@ -623,46 +677,39 @@ export const getBills = async (): Promise<SavedBill[]> => {
   return getLocalBills();
 };
 
-export const getNextBillNo = async (customerId: string): Promise<number> => {
-  if (!customerId) {
-    throw new Error('Select a customer before requesting the next bill number.');
-  }
-  const customerRef = doc(db, 'customers', customerId);
-  const customerSnapshot = await getDoc(customerRef);
-  if (!customerSnapshot.exists()) {
-    throw new Error('The selected customer no longer exists in Firestore.');
-  }
-  const data = customerSnapshot.data();
-  let lastBillNo = data.lastBillNo;
-  // Auto-heal: if lastBillNo is missing or invalid, initialise it to 0
-  if (!Number.isInteger(lastBillNo) || lastBillNo < 0) {
-    // Derive from existing bills for this customer if possible
-    try {
-      const billsSnap = await getDocs(query(collection(db, 'bills'), where('customerId', '==', customerId)));
-      const maxNo = billsSnap.docs.reduce((max, d) => Math.max(max, Number(d.data().billNo) || 0), 0);
-      lastBillNo = maxNo;
-    } catch {
-      lastBillNo = 0;
+export const getNextBillNo = async (customerId?: string): Promise<number> => {
+  if (!customerId) return 1;
+  try {
+    const customerRef = doc(db, 'customers', customerId);
+    const customerSnapshot = await withTimeout(getDoc(customerRef), 2000);
+    if (customerSnapshot.exists()) {
+      const data = customerSnapshot.data();
+      if (Number.isInteger(data.lastBillNo) && data.lastBillNo >= 0) {
+        return data.lastBillNo + 1;
+      }
     }
-    // Persist the healed value so future calls are fast
-    try {
-      await updateDoc(customerRef, { lastBillNo });
-    } catch {
-      // non-fatal
-    }
+  } catch {
+    // ignore
   }
-  return lastBillNo + 1;
+
+  // Derive locally from existing bills for this customer
+  try {
+    const localBills = getLocalBills();
+    const customerBills = localBills.filter(b => b.customerId === customerId);
+    if (customerBills.length > 0) {
+      const maxNo = customerBills.reduce((max, b) => Math.max(max, Number(b.billNo) || 0), 0);
+      return maxNo + 1;
+    }
+  } catch {
+    // ignore
+  }
+  return 1;
 };
 
 export const createBill = async (bill: SavedBill): Promise<SavedBill> => {
-  if (!bill.customerId) {
-    throw new Error('A Firestore customer document ID is required to save a bill.');
-  }
   const adv = bill.advance !== undefined && bill.advance !== '' ? bill.advance : (bill.receipt ?? '');
   const prevBal = bill.previousBalance !== undefined && bill.previousBalance !== '' ? bill.previousBalance : (bill.prevBalance ?? '');
-  const customerId = bill.customerId;
-  const customerRef = doc(db, 'customers', customerId);
-  const billRef = doc(collection(db, 'bills'));
+  const customerId = String(bill.customerId || 'local_' + Date.now());
 
   const mappedItems: BillItem[] = bill.items.map(item => {
     const q = item.quantity !== undefined && item.quantity !== '' ? item.quantity : (item.qty ?? '');
@@ -686,50 +733,62 @@ export const createBill = async (bill: SavedBill): Promise<SavedBill> => {
   const totalAmount = Number(bill.totalAmount) || 0;
   const advance = Number(adv) || 0;
   const finalBalance = totalAmount - advance;
-  const date = Timestamp.fromDate(parseBillDate(String(bill.date)));
-  const payload = {
-    customerId,
-    date,
-    customerName: bill.customerName.trim(),
-    address: (bill.address || '').trim(),
-    quantity: totalQty,
-    price: avgPrice,
-    items: mappedItems,
-    previousBalance: String(prevBal),
-    prevBalance: String(prevBal),
-    advance,
-    receipt: advance,
-    totalAmount,
-    finalBalance,
-    createdAt: Timestamp.now()
-  };
 
-  let billNo = 0;
-  await runTransaction(db, async transaction => {
-    const customerSnapshot = await transaction.get(customerRef);
-    if (!customerSnapshot.exists()) {
-      throw new Error('The selected customer no longer exists in Firestore.');
-    }
-    let lastBillNo = customerSnapshot.data().lastBillNo;
-    // Auto-heal: derive from existing bills if lastBillNo is missing/invalid
-    if (!Number.isInteger(lastBillNo) || lastBillNo < 0) {
-      const billsSnap = await getDocs(query(collection(db, 'bills'), where('customerId', '==', customerId)));
-      lastBillNo = billsSnap.docs.reduce((max, d) => Math.max(max, Number(d.data().billNo) || 0), 0);
-    }
-    billNo = lastBillNo + 1;
-    transaction.update(customerRef, {
-      lastBillNo: billNo,
-      balance: finalBalance,
-      updatedAt: new Date().toISOString()
-    });
-    transaction.set(billRef, { billNo, ...payload });
-  });
+  // Use user-provided bill number
+  const billNoNum = Number(bill.billNo) || 1;
+  const billNoStr = String(bill.billNo || billNoNum);
 
+  let savedId = 'bill_' + Date.now();
+
+  // Try saving to Firebase Firestore
+  try {
+    const billRef = doc(collection(db, 'bills'));
+    savedId = billRef.id;
+    const date = Timestamp.fromDate(parseBillDate(String(bill.date)));
+    const payload = {
+      billNo: billNoNum,
+      customerId,
+      date,
+      customerName: bill.customerName.trim(),
+      address: (bill.address || '').trim(),
+      quantity: totalQty,
+      price: avgPrice,
+      items: mappedItems,
+      previousBalance: String(prevBal),
+      prevBalance: String(prevBal),
+      advance,
+      receipt: advance,
+      totalAmount,
+      finalBalance,
+      createdAt: Timestamp.now()
+    };
+
+    try {
+      const customerRef = doc(db, 'customers', customerId);
+      await runTransaction(db, async transaction => {
+        const customerSnapshot = await transaction.get(customerRef);
+        if (customerSnapshot.exists()) {
+          transaction.update(customerRef, {
+            lastBillNo: billNoNum,
+            balance: finalBalance,
+            updatedAt: new Date().toISOString()
+          });
+        }
+        transaction.set(billRef, payload);
+      });
+    } catch {
+      await setDoc(billRef, payload);
+    }
+  } catch (firebaseErr) {
+    console.warn('[Firebase] Firestore createBill fallback to local:', firebaseErr);
+  }
+
+  // Always save to local backup
   const localBill: SavedBill = {
     ...bill,
-    id: billRef.id,
+    id: savedId,
     customerId,
-    billNo: String(billNo),
+    billNo: billNoStr,
     date: formatDateToDMY(String(bill.date)),
     advance,
     totalAmount,

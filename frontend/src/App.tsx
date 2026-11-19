@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import html2canvas from 'html2canvas';
 import logoImg from './assets/seafoodz.jpeg';
-import { getCustomers, getBills, getNextBillNo, createBill, updateCustomer, deleteBill, formatDisplayDate, formatDateToDMY, formatDateToYMD } from './api';
+import { getCustomers, getBills, getNextBillNo, createBill, createCustomer, updateCustomer, deleteBill, formatDisplayDate, formatDateToDMY, formatDateToYMD, DEFAULT_INITIAL_CUSTOMERS, getLocalCustomers } from './api';
 import type { CustomerData, SavedBill, BillItem } from './api';
 
 
@@ -52,47 +52,71 @@ function App() {
   const [prevBalance, setPrevBalance] = useState<string>('');
   const [advance, setAdvance] = useState<string>('');
 
-  const [savedCustomers, setSavedCustomers] = useState<Record<string, CustomerData>>({});
+  const [savedCustomers, setSavedCustomers] = useState<Record<string, CustomerData>>(() => {
+    const map: Record<string, CustomerData> = {};
+    const local = getLocalCustomers();
+    const source = (Array.isArray(local) && local.length > 0) ? local : DEFAULT_INITIAL_CUSTOMERS;
+    source.forEach(c => {
+      if (c && c.name && c.id !== undefined) {
+        map[String(c.id)] = { ...c };
+      }
+    });
+    return map;
+  });
   const [savedBills, setSavedBills] = useState<SavedBill[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        const [customersData, billsData] = await Promise.all([
-          getCustomers(),
-          getBills()
-        ]);
+  const fetchData = async () => {
+    try {
+      setLoading(true);
 
-        const customerMap: Record<string, CustomerData> = {};
-        if (Array.isArray(customersData)) {
+      // 1. Fetch Customers independently
+      try {
+        const customersData = await getCustomers();
+        if (Array.isArray(customersData) && customersData.length > 0) {
+          const customerMap: Record<string, CustomerData> = {};
           customersData.forEach(c => {
             if (c && c.name && c.id !== undefined) {
               customerMap[String(c.id)] = { ...c };
             }
           });
+          setSavedCustomers(customerMap);
         }
-
-        if (Array.isArray(billsData) && billsData.length > 0) {
-          const sortedBills = [...billsData].sort((a, b) => (Number(a.billNo) || 0) - (Number(b.billNo) || 0));
-          sortedBills.forEach(b => {
-            const customer = b.customerId ? customerMap[b.customerId] : undefined;
-            if (customer) {
-              customer.balance = Number(b.finalBalance) || 0;
-            }
-          });
-        }
-
-        setSavedCustomers(customerMap);
-        setSavedBills(Array.isArray(billsData) ? billsData : []);
-      } catch (err: any) {
-        console.warn('Initial data load warning:', err);
-      } finally {
-        setLoading(false);
+      } catch (custErr) {
+        console.warn('Customer load fallback:', custErr);
       }
-    };
+
+      // 2. Fetch Bills independently
+      try {
+        const billsData = await getBills();
+        if (Array.isArray(billsData)) {
+          setSavedBills(billsData);
+          if (billsData.length > 0) {
+            const sortedBills = [...billsData].sort((a, b) => (Number(a.billNo) || 0) - (Number(b.billNo) || 0));
+            setSavedCustomers(prev => {
+              const updated = { ...prev };
+              sortedBills.forEach(b => {
+                const customer = b.customerId ? updated[b.customerId] : undefined;
+                if (customer) {
+                  customer.balance = Number(b.finalBalance) || 0;
+                }
+              });
+              return updated;
+            });
+          }
+        }
+      } catch (billsErr) {
+        console.warn('Bills load fallback:', billsErr);
+      }
+    } catch (err: any) {
+      console.warn('Initial data load warning:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchData();
   }, []);
 
@@ -182,6 +206,7 @@ function App() {
     });
 
     if (matchedKey) {
+      setSelectedCustomerId(matchedKey);
       let bal = savedCustomers[matchedKey].balance;
 
       const hasBillsForCustomer = savedBills.some(b => {
@@ -231,13 +256,40 @@ function App() {
   const finalBalance = subTotal - (Number(advance) || 0);
 
   const handleSaveBill = async () => {
-    if (!selectedCustomerId || !customerName.trim() || !address.trim()) {
-      alert("Error: Please select a customer and provide both Customer Name and Address before saving!");
+    if (!customerName.trim() || !address.trim()) {
+      alert("Error: Please provide both Customer Name and Address before saving!");
       return;
     }
 
+    let customerId = selectedCustomerId;
+    if (!customerId) {
+      const trimmedName = customerName.trim();
+      const matchedKey = Object.keys(savedCustomers).find(k => {
+        const c = savedCustomers[k];
+        return c.name.trim().toLowerCase() === trimmedName.toLowerCase();
+      });
+      if (matchedKey) {
+        customerId = matchedKey;
+        setSelectedCustomerId(matchedKey);
+      } else {
+        try {
+          const newCust = await createCustomer({
+            name: trimmedName,
+            address: address.trim(),
+            balance: 0
+          });
+          customerId = String(newCust.id);
+          setSelectedCustomerId(customerId);
+          setSavedCustomers(prev => ({ ...prev, [customerId]: newCust }));
+        } catch (err: any) {
+          alert('Error creating customer: ' + err.message);
+          return;
+        }
+      }
+    }
+
     const newBill: SavedBill = {
-      customerId: selectedCustomerId,
+      customerId,
       billNo,
       date: formatDateToDMY(date),
       customerName,
@@ -262,8 +314,8 @@ function App() {
       setSavedBills(updatedBills);
 
       const updatedCustomer = {
-        ...savedCustomers[selectedCustomerId],
-        id: selectedCustomerId,
+        ...savedCustomers[customerId],
+        id: customerId,
         name: customerName,
         address: address,
         balance: saved.finalBalance
@@ -271,7 +323,7 @@ function App() {
 
       const updatedCustomers = {
         ...savedCustomers,
-        [selectedCustomerId]: updatedCustomer
+        [customerId]: updatedCustomer
       };
       setSavedCustomers(updatedCustomers);
 
@@ -524,17 +576,23 @@ function App() {
               >
                 <option value="">Select a customer...</option>
                 {(() => {
-                  const seenNames = new Set<string>();
-                  return Object.entries(savedCustomers)
-                    .sort(([, a], [, b]) => a.name.localeCompare(b.name))
-                    .filter(([, customer]) => {
-                      const key = customer.name.trim().toLowerCase();
-                      if (seenNames.has(key)) return false;
-                      seenNames.add(key);
+                  const seen = new Set<string>();
+                  const entries = Object.entries(savedCustomers);
+                  const list = entries.length > 0
+                    ? entries.map(([id, customer]) => ({ id, ...customer }))
+                    : DEFAULT_INITIAL_CUSTOMERS.map(c => ({ id: String(c.id), ...c }));
+
+                  return list
+                    .filter(c => c && c.name)
+                    .sort((a, b) => `${a.name || ''} - ${a.address || ''}`.localeCompare(`${b.name || ''} - ${b.address || ''}`))
+                    .filter(c => {
+                      const key = (c.name || '').trim().toLowerCase();
+                      if (seen.has(key)) return false;
+                      seen.add(key);
                       return true;
                     })
-                    .map(([id, customer]) => (
-                      <option key={id} value={id}>{customer.name} - {customer.address}</option>
+                    .map(c => (
+                      <option key={c.id} value={String(c.id)}>{c.name} - {c.address}</option>
                     ));
                 })()}
               </select>
@@ -704,17 +762,23 @@ function App() {
               <select value={paymentCustomerKey} onChange={e => setPaymentCustomerKey(e.target.value)}>
                 <option value="">Select a customer...</option>
                 {(() => {
-                  const seenNames2 = new Set<string>();
-                  return Object.entries(savedCustomers)
-                    .sort(([, a], [, b]) => a.name.localeCompare(b.name))
-                    .filter(([, customer]) => {
-                      const key = customer.name.trim().toLowerCase();
-                      if (seenNames2.has(key)) return false;
-                      seenNames2.add(key);
+                  const seen2 = new Set<string>();
+                  const entries = Object.entries(savedCustomers);
+                  const list = entries.length > 0
+                    ? entries.map(([id, customer]) => ({ id, ...customer }))
+                    : DEFAULT_INITIAL_CUSTOMERS.map(c => ({ id: String(c.id), ...c }));
+
+                  return list
+                    .filter(c => c && c.name)
+                    .sort((a, b) => `${a.name || ''} - ${a.address || ''}`.localeCompare(`${b.name || ''} - ${b.address || ''}`))
+                    .filter(c => {
+                      const key = (c.name || '').trim().toLowerCase();
+                      if (seen2.has(key)) return false;
+                      seen2.add(key);
                       return true;
                     })
-                    .map(([id, customer]) => (
-                      <option key={id} value={id}>{customer.name} - {customer.address}</option>
+                    .map(c => (
+                      <option key={c.id} value={String(c.id)}>{c.name} - {c.address}</option>
                     ));
                 })()}
               </select>

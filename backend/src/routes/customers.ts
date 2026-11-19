@@ -11,18 +11,19 @@ export interface CustomerData {
 }
 
 export const DEFAULT_INITIAL_CUSTOMERS: Omit<CustomerData, 'id'>[] = [
-  { name: "பச்சையப்பன்", address: "கந்தம்பாளையம்", balance: 0 },
-  { name: "முருகன்", address: "வேட்டவலம்", balance: 0 },
-  { name: "ஹரிதாஸ்", address: "வேட்டவலம்", balance: 0 },
-  { name: "முரளி", address: "வேட்டவலம்", balance: 0 },
-  { name: "பெருமாள்", address: "கண்டாச்சிபுரம்", balance: 0 },
-  { name: "கோபி", address: "கண்டாச்சிபுரம்", balance: 0 },
-  { name: "முரளி", address: "கண்டாச்சிபுரம்", balance: 0 },
-  { name: "ராஜா", address: "கண்டாச்சிபுரம்", balance: 0 },
+  { name: "Pachaippan", address: "KKM", balance: 0 },
+  { name: "SRS", address: "விழுப்புரம்", balance: 0 },
+  { name: "SRS சிவராஜ்", address: "விழுப்புரம்", balance: 0 },
   { name: "ஏழுமலை", address: "கண்டாச்சிபுரம்", balance: 0 },
+  { name: "கோபி", address: "கண்டாச்சிபுரம்", balance: 0 },
   { name: "சுரேஷ்", address: "உளுந்தூர்பேட்டை", balance: 0 },
+  { name: "பச்சையப்பன்", address: "கந்தம்பாளையம்", balance: 0 },
+  { name: "பெருமாள்", address: "கண்டாச்சிபுரம்", balance: 0 },
+  { name: "முரளி", address: "வேட்டவலம்", balance: 0 },
+  { name: "முருகன்", address: "வேட்டவலம்", balance: 0 },
+  { name: "ராஜா", address: "கண்டாச்சிபுரம்", balance: 0 },
   { name: "விஜி", address: "விருத்தாச்சலம்", balance: 0 },
-  { name: "SRS சிவராஜ்", address: "விழுப்புரம்", balance: 0 }
+  { name: "ஹரிதாஸ்", address: "வேட்டவலம்", balance: 0 }
 ];
 
 // Fallback in-memory customer storage
