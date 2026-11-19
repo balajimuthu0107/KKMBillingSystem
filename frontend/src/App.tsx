@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import html2canvas from 'html2canvas';
 import logoImg from './assets/seafoodz.jpeg';
-import { getCustomers, getBills, createBill, createCustomer, updateCustomer, deleteBill, formatDisplayDate, formatDateToDMY, formatDateToYMD, DEFAULT_INITIAL_CUSTOMERS, getLocalCustomers } from './api';
+import { getCustomers, getBills, createBill, createCustomer, updateCustomer, deleteBill, formatDisplayDate, formatDateToDMY, formatDateToYMD, DEFAULT_INITIAL_CUSTOMERS, getLocalCustomers, syncAllLocalBillsToFirestore } from './api';
 import type { CustomerData, SavedBill, BillItem } from './api';
 
 
@@ -121,6 +121,38 @@ function App() {
   }, []);
 
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [syncingCloud, setSyncingCloud] = useState(false);
+  const [syncStatusMsg, setSyncStatusMsg] = useState<{ text: string; isError?: boolean } | null>(null);
+
+  const handleSyncToCloud = async () => {
+    setSyncingCloud(true);
+    setSyncStatusMsg(null);
+    try {
+      const res = await syncAllLocalBillsToFirestore();
+      if (res.error) {
+        setSyncStatusMsg({
+          text: `Cloud sync notice: ${res.error}. Please ensure Firebase Console rules allow read/write.`,
+          isError: true
+        });
+      } else {
+        const count = res.count;
+        setSyncStatusMsg({
+          text: count > 0
+            ? `✅ ${count} bill(s) successfully synced to Cloud! Other devices can now see them.`
+            : `✅ All bills are already synchronized with Cloud!`,
+          isError: false
+        });
+        const fresh = await getBills();
+        if (fresh && fresh.length > 0) {
+          setSavedBills(fresh);
+        }
+      }
+    } catch (err: any) {
+      setSyncStatusMsg({ text: `Failed to sync: ${err.message}`, isError: true });
+    } finally {
+      setSyncingCloud(false);
+    }
+  };
 
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -680,10 +712,36 @@ function App() {
           backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
         }}>
           <div className="card no-print" style={{ width: '90%', maxWidth: '800px', maxHeight: '80vh', overflowY: 'auto', backgroundColor: '#fff', border: '2px solid #0b4b8a' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '8px' }}>
               <h2 style={{ margin: 0, color: '#0b4b8a', borderBottom: 'none' }}>📜 Previous Bills History</h2>
-              <button className="btn btn-danger" onClick={() => setShowHistoryModal(false)}>Close</button>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button
+                  className="btn"
+                  style={{ backgroundColor: '#0d6efd', color: '#fff', fontSize: '13px', padding: '6px 12px' }}
+                  onClick={handleSyncToCloud}
+                  disabled={syncingCloud}
+                  title="Upload all local bills to Cloud so other devices can view them"
+                >
+                  {syncingCloud ? '⏳ Syncing...' : '☁️ Sync to Cloud'}
+                </button>
+                <button className="btn btn-danger" style={{ padding: '6px 12px' }} onClick={() => setShowHistoryModal(false)}>Close</button>
+              </div>
             </div>
+
+            {syncStatusMsg && (
+              <div style={{
+                padding: '8px 12px',
+                marginBottom: '1rem',
+                borderRadius: '4px',
+                backgroundColor: syncStatusMsg.isError ? '#f8d7da' : '#d1e7dd',
+                color: syncStatusMsg.isError ? '#842029' : '#0f5132',
+                border: `1px solid ${syncStatusMsg.isError ? '#f5c2c7' : '#badbcc'}`,
+                fontSize: '13px',
+                fontWeight: 'bold'
+              }}>
+                {syncStatusMsg.text}
+              </div>
+            )}
 
             {savedBills.length === 0 ? (
               <p>No bills saved yet.</p>

@@ -101,8 +101,8 @@ export const formatDisplayDate = (dateStr: string): string => {
 };
 
 const formatFirestoreDate = (value: unknown): string => {
-  if (value instanceof Timestamp) {
-    return formatDateToDMY(value.toDate().toISOString().slice(0, 10));
+  if (value && typeof value === 'object' && typeof (value as any).toDate === 'function') {
+    return formatDateToDMY((value as any).toDate().toISOString().slice(0, 10));
   }
   if (value instanceof Date) {
     return formatDateToDMY(value.toISOString().slice(0, 10));
@@ -546,64 +546,167 @@ export const deleteCustomer = async (id: number | string): Promise<void> => {
 // Bills API (Firebase Firestore & Backup)
 // ==========================================
 
+export const uploadBillToFirestore = async (bill: SavedBill): Promise<string> => {
+  const billRef = doc(collection(db, 'bills'));
+  let billDate: Date;
+  try {
+    billDate = parseBillDate(String(bill.date));
+  } catch {
+    billDate = new Date();
+  }
+
+  const billNoNum = Number(bill.billNo) || 1;
+  const adv = bill.advance !== undefined && bill.advance !== '' ? Number(bill.advance) : (bill.receipt !== undefined ? Number(bill.receipt) : 0);
+  const prevBal = bill.previousBalance !== undefined && bill.previousBalance !== '' ? String(bill.previousBalance) : String(bill.prevBalance ?? '');
+  
+  const mappedItems: BillItem[] = (bill.items || []).map(item => {
+    const q = item.quantity !== undefined && item.quantity !== '' ? item.quantity : (item.qty ?? '');
+    const p = item.price !== undefined && item.price !== '' ? item.price : (item.rate ?? '');
+    const kg = item.kg !== undefined ? item.kg : '';
+    return {
+      frontendId: item.id?.toString(),
+      particulars: item.particulars || '',
+      quantity: q,
+      qty: q,
+      kg: kg,
+      price: p,
+      rate: p,
+      amount: (Number(q) || 0) * (Number(p) || 0)
+    };
+  });
+
+  const totalQty = mappedItems.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
+  const avgPrice = mappedItems.length > 0 ? (Number(mappedItems[0].price) || 0) : 0;
+  const totalAmount = Number(bill.totalAmount) || 0;
+  const finalBalance = totalAmount - adv;
+
+  const payload = {
+    billNo: billNoNum,
+    customerId: String(bill.customerId || ''),
+    customerName: (bill.customerName || '').trim(),
+    address: (bill.address || '').trim(),
+    date: Timestamp.fromDate(billDate),
+    quantity: totalQty,
+    price: avgPrice,
+    items: mappedItems,
+    previousBalance: prevBal,
+    prevBalance: prevBal,
+    advance: adv,
+    receipt: adv,
+    totalAmount,
+    finalBalance,
+    createdAt: Timestamp.now()
+  };
+
+  await setDoc(billRef, payload);
+  return billRef.id;
+};
+
+export const syncAllLocalBillsToFirestore = async (): Promise<{ count: number; error?: string }> => {
+  const localBills = getLocalBills();
+  if (!Array.isArray(localBills) || localBills.length === 0) {
+    return { count: 0 };
+  }
+
+  try {
+    const billsCol = collection(db, 'bills');
+    const snapshot = await withTimeout(getDocs(billsCol), 5000);
+    const cloudBillKeys = new Set<string>();
+    snapshot.forEach(docSnap => {
+      const data = docSnap.data();
+      const num = String(data.billNo || '');
+      const cust = (data.customerName || '').trim();
+      const amt = Number(data.totalAmount) || 0;
+      cloudBillKeys.add(`${num}_${cust}_${amt}`);
+    });
+
+    let uploadedCount = 0;
+    for (const lb of localBills) {
+      const key = `${lb.billNo}_${(lb.customerName || '').trim()}_${lb.totalAmount}`;
+      if (!cloudBillKeys.has(key)) {
+        await uploadBillToFirestore(lb);
+        cloudBillKeys.add(key);
+        uploadedCount++;
+      }
+    }
+    return { count: uploadedCount };
+  } catch (err: any) {
+    console.error('syncAllLocalBillsToFirestore error:', err);
+    return { count: 0, error: err?.message || 'Failed to connect to Firebase Firestore' };
+  }
+};
+
 export const getBills = async (): Promise<SavedBill[]> => {
+  let list: SavedBill[] = [];
+
   // 1. Try Firebase Firestore with resilient in-memory ordering
   try {
     const billsCol = collection(db, 'bills');
-    const snapshot = await withTimeout(getDocs(billsCol), 3500);
-    if (!snapshot.empty) {
-      const list: SavedBill[] = [];
-      snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        const adv = data.advance !== undefined ? data.advance : (data.receipt !== undefined ? data.receipt : '');
-        const prevBal = data.previousBalance !== undefined ? data.previousBalance : (data.prevBalance !== undefined ? data.prevBalance : '');
-        
-        const rawItems = Array.isArray(data.items) ? data.items : [];
-        const mappedItems: BillItem[] = rawItems.map((it: any) => {
-          const q = it.quantity !== undefined ? it.quantity : (it.qty !== undefined ? it.qty : '');
-          const p = it.price !== undefined ? it.price : (it.rate !== undefined ? it.rate : '');
-          const kg = it.kg !== undefined ? it.kg : '';
-          return {
-            id: it.id || it.frontendId,
-            frontendId: it.frontendId || String(it.id || ''),
-            particulars: it.particulars || '',
-            quantity: q,
-            qty: q,
-            kg: kg,
-            price: p,
-            rate: p,
-            amount: (Number(q) || 0) * (Number(p) || 0)
-          };
-        });
-
-        list.push({
-          id: docSnap.id,
-          billNo: String(data.billNo || ''),
-          customerId: String(data.customerId || ''),
-          date: formatFirestoreDate(data.date),
-          customerName: String(data.customerName || ''),
-          address: String(data.address || ''),
-          items: mappedItems,
-          quantity: Number(data.quantity) || mappedItems.reduce((acc, it) => acc + (Number(it.quantity) || 0), 0),
-          price: Number(data.price) || (mappedItems.length > 0 ? Number(mappedItems[0].price) || 0 : 0),
-          previousBalance: prevBal,
-          prevBalance: prevBal,
-          advance: adv,
-          receipt: adv,
-          totalAmount: Number(data.totalAmount) || 0,
-          finalBalance: Number(data.finalBalance) || 0,
-          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : data.createdAt
-        });
+    const snapshot = await withTimeout(getDocs(billsCol), 4000);
+    snapshot.forEach(docSnap => {
+      const data = docSnap.data();
+      const adv = data.advance !== undefined ? data.advance : (data.receipt !== undefined ? data.receipt : '');
+      const prevBal = data.previousBalance !== undefined ? data.previousBalance : (data.prevBalance !== undefined ? data.prevBalance : '');
+      
+      const rawItems = Array.isArray(data.items) ? data.items : [];
+      const mappedItems: BillItem[] = rawItems.map((it: any) => {
+        const q = it.quantity !== undefined ? it.quantity : (it.qty !== undefined ? it.qty : '');
+        const p = it.price !== undefined ? it.price : (it.rate !== undefined ? it.rate : '');
+        const kg = it.kg !== undefined ? it.kg : '';
+        return {
+          id: it.id || it.frontendId,
+          frontendId: it.frontendId || String(it.id || ''),
+          particulars: it.particulars || '',
+          quantity: q,
+          qty: q,
+          kg: kg,
+          price: p,
+          rate: p,
+          amount: (Number(q) || 0) * (Number(p) || 0)
+        };
       });
 
-      // Keep history grouped by customer and ordered by that customer's sequence.
+      list.push({
+        id: docSnap.id,
+        billNo: String(data.billNo || ''),
+        customerId: String(data.customerId || ''),
+        date: formatFirestoreDate(data.date),
+        customerName: String(data.customerName || ''),
+        address: String(data.address || ''),
+        items: mappedItems,
+        quantity: Number(data.quantity) || mappedItems.reduce((acc, it) => acc + (Number(it.quantity) || 0), 0),
+        price: Number(data.price) || (mappedItems.length > 0 ? Number(mappedItems[0].price) || 0 : 0),
+        previousBalance: prevBal,
+        prevBalance: prevBal,
+        advance: adv,
+        receipt: adv,
+        totalAmount: Number(data.totalAmount) || 0,
+        finalBalance: Number(data.finalBalance) || 0,
+        createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : data.createdAt
+      });
+    });
+
+    // Check if this device has local bills that need to be uploaded to Firestore
+    const localBills = getLocalBills();
+    if (Array.isArray(localBills) && localBills.length > 0) {
+      const cloudBillKeys = new Set(list.map(b => `${b.billNo}_${b.customerName}_${b.totalAmount}`));
+      for (const lb of localBills) {
+        const key = `${lb.billNo}_${lb.customerName}_${lb.totalAmount}`;
+        if (!cloudBillKeys.has(key)) {
+          list.push(lb);
+          // Upload local bill to Firestore so other devices can view it
+          uploadBillToFirestore(lb).catch(() => {});
+        }
+      }
+    }
+
+    if (list.length > 0) {
       list.sort((a, b) => {
         const customerCompare = `${a.customerName} - ${a.address}`.localeCompare(`${b.customerName} - ${b.address}`);
         return customerCompare
           || String(a.customerId || '').localeCompare(String(b.customerId || ''))
           || (Number(a.billNo) || 0) - (Number(b.billNo) || 0);
       });
-
       saveLocalBills(list);
       return list;
     }
@@ -620,26 +723,21 @@ export const getBills = async (): Promise<SavedBill[]> => {
 
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data)) {
-        const list: SavedBill[] = data.map((b: any) => {
+      if (Array.isArray(data) && data.length > 0) {
+        const backendList: SavedBill[] = data.map((b: any) => {
           const adv = b.advance !== undefined ? b.advance : (b.receipt !== undefined ? b.receipt : '');
           const prevBal = b.previousBalance !== undefined ? b.previousBalance : (b.prevBalance !== undefined ? b.prevBalance : '');
-          const mappedItems: BillItem[] = (Array.isArray(b.items) ? b.items : []).map((it: any) => {
-            const q = it.quantity !== undefined ? it.quantity : (it.qty !== undefined ? it.qty : '');
-            const p = it.price !== undefined ? it.price : (it.rate !== undefined ? it.rate : '');
-            const kg = it.kg !== undefined ? it.kg : '';
-            return {
-              id: it.id || it.frontendId,
-              frontendId: it.frontendId || String(it.id || ''),
-              particulars: it.particulars || '',
-              quantity: q,
-              qty: q,
-              kg: kg,
-              price: p,
-              rate: p,
-              amount: (Number(q) || 0) * (Number(p) || 0)
-            };
-          });
+          const mappedItems: BillItem[] = (Array.isArray(b.items) ? b.items : []).map((it: any) => ({
+            id: it.id || it.frontendId,
+            frontendId: it.frontendId || String(it.id || ''),
+            particulars: it.particulars || '',
+            quantity: it.quantity !== undefined ? it.quantity : (it.qty !== undefined ? it.qty : ''),
+            qty: it.quantity !== undefined ? it.quantity : (it.qty !== undefined ? it.qty : ''),
+            kg: it.kg !== undefined ? it.kg : '',
+            price: it.price !== undefined ? it.price : (it.rate !== undefined ? it.rate : ''),
+            rate: it.price !== undefined ? it.price : (it.rate !== undefined ? it.rate : ''),
+            amount: (Number(it.quantity ?? it.qty) || 0) * (Number(it.price ?? it.rate) || 0)
+          }));
 
           return {
             id: b.id,
@@ -649,8 +747,8 @@ export const getBills = async (): Promise<SavedBill[]> => {
             customerName: String(b.customerName || ''),
             address: String(b.address || ''),
             items: mappedItems,
-            quantity: Number(b.quantity) || mappedItems.reduce((acc, it) => acc + (Number(it.quantity) || 0), 0),
-            price: Number(b.price) || (mappedItems.length > 0 ? Number(mappedItems[0].price) || 0 : 0),
+            quantity: Number(b.quantity) || 0,
+            price: Number(b.price) || 0,
             previousBalance: prevBal,
             prevBalance: prevBal,
             advance: adv,
@@ -661,14 +759,8 @@ export const getBills = async (): Promise<SavedBill[]> => {
           };
         });
 
-        list.sort((a, b) => {
-          const customerCompare = `${a.customerName} - ${a.address}`.localeCompare(`${b.customerName} - ${b.address}`);
-          return customerCompare
-            || String(a.customerId || '').localeCompare(String(b.customerId || ''))
-            || (Number(a.billNo) || 0) - (Number(b.billNo) || 0);
-        });
-        saveLocalBills(list);
-        return list;
+        saveLocalBills(backendList);
+        return backendList;
       }
     }
   } catch {
