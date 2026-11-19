@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import html2canvas from 'html2canvas';
 import logoImg from './assets/seafoodz.jpeg';
-import { getCustomers, getBills, getNextBillNo, createBill, createCustomer, updateCustomer, deleteBill, formatDisplayDate, formatDateToDMY, formatDateToYMD, DEFAULT_INITIAL_CUSTOMERS, getLocalCustomers } from './api';
+import { getCustomers, getBills, createBill, createCustomer, updateCustomer, deleteBill, formatDisplayDate, formatDateToDMY, formatDateToYMD, DEFAULT_INITIAL_CUSTOMERS, getLocalCustomers } from './api';
 import type { CustomerData, SavedBill, BillItem } from './api';
 
 
@@ -37,7 +37,7 @@ function App() {
 
   const datePickerRef = useRef<HTMLInputElement>(null);
 
-  const [billNoPreview, setBillNoPreview] = useState<{ customerId: string; billNo: string } | null>(null);
+  const [billNo, setBillNo] = useState<string>('1');
 
   const [date, setDate] = useState<string>(getTodayDate);
 
@@ -120,24 +120,6 @@ function App() {
     fetchData();
   }, []);
 
-  useEffect(() => {
-    if (!selectedCustomerId) return;
-    let cancelled = false;
-    getNextBillNo(selectedCustomerId)
-      .then(nextNo => {
-        if (!cancelled) setBillNoPreview({ customerId: selectedCustomerId, billNo: String(nextNo) });
-      })
-      .catch(err => {
-        if (!cancelled) {
-          setBillNoPreview(null);
-          setError(`Could not load the next bill number: ${err.message}`);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedCustomerId]);
-
   const [showHistoryModal, setShowHistoryModal] = useState(false);
 
 
@@ -159,6 +141,7 @@ function App() {
     })));
     setPrevBalance(String(bill.previousBalance ?? bill.prevBalance ?? ''));
     setAdvance(String(bill.advance ?? bill.receipt ?? ''));
+    setBillNo(bill.billNo || '1');
     setShowHistoryModal(false);
   };
 
@@ -189,6 +172,11 @@ function App() {
     setCustomerName(customer.name);
     setAddress(customer.address || '');
     setPrevBalance(customer.balance === 0 ? '' : String(customer.balance));
+
+    // Auto-suggest next bill number from existing bills for this customer
+    const customerBills = savedBills.filter(b => b.customerId === customerId || (customer.name && b.customerName === customer.name));
+    const maxBillNo = customerBills.reduce((max, b) => Math.max(max, Number(b.billNo) || 0), Number(customer.lastBillNo) || 0);
+    setBillNo(String(maxBillNo + 1));
   };
 
   const handleManualEdit = (newName: string, newAddress: string) => {
@@ -336,6 +324,7 @@ function App() {
       setSelectedCustomerId('');
       setPrevBalance('');
       setAdvance('');
+      setBillNo(prev => String((Number(prev) || 0) + 1));
       setItems([{ id: Date.now().toString(), particulars: FISH_TYPES[0], qty: '', rate: '', kg: '', quantity: '', price: '' }]);
     } catch (err: any) {
       alert('Error saving bill: ' + err.message);
@@ -379,6 +368,7 @@ function App() {
       setSelectedCustomerId('');
       setPrevBalance('');
       setAdvance('');
+      setBillNo(prev => String((Number(prev) || 0) + 1));
       setItems([{ id: Date.now().toString(), particulars: FISH_TYPES[0], qty: '', rate: '', kg: '', quantity: '', price: '' }]);
     }
   };
@@ -477,7 +467,6 @@ function App() {
   };
 
   const selectedCustomer = savedCustomers[selectedCustomerId];
-  const billNo = billNoPreview?.customerId === selectedCustomerId ? billNoPreview.billNo : '';
 
   return (
     <div className="container">
@@ -518,7 +507,13 @@ function App() {
           <div className="form-grid">
             <div className="form-group">
               <label>Bill No</label>
-              <input type="text" value={billNo} readOnly />
+              <input
+                type="text"
+                value={billNo}
+                onChange={e => setBillNo(e.target.value)}
+                placeholder="Enter Bill No"
+                style={{ fontWeight: 'bold' }}
+              />
             </div>
             <div className="form-group">
               <label>Date (DD-MM-YYYY)</label>
