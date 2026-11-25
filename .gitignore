@@ -36,5 +36,6 @@ test_firestore.mjs
 *.mjs
 check_db.ts
 seed_bills.ts
+api/
 
 
