@@ -217,15 +217,27 @@ router.post('/', async (req: Request, res: Response) => {
 // DELETE bill
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
+    await connectDB();
     const id = String(req.params.id);
+    const { billNo, customerName, totalAmount, date } = req.body || {};
 
     if (isDbConnected()) {
+      let deleted = null;
       if (id.match(/^[0-9a-fA-F]{24}$/)) {
-        await Bill.findByIdAndDelete(id);
-      } else {
-        await Bill.findOneAndDelete({ billNo: id });
+        deleted = await Bill.findByIdAndDelete(id);
       }
-      return res.json({ message: 'Bill deleted successfully' });
+      if (!deleted && (billNo || customerName)) {
+        const query: any = {};
+        if (billNo || id) query.billNo = String(billNo || id);
+        if (customerName) query.customerName = String(customerName).trim();
+        if (totalAmount !== undefined && totalAmount !== null) query.totalAmount = Number(totalAmount);
+        if (date) query.date = String(date).trim();
+        deleted = await Bill.findOneAndDelete(query);
+      }
+      if (!deleted && id) {
+        deleted = await Bill.findOneAndDelete({ billNo: id });
+      }
+      return res.json({ message: 'Bill deleted successfully', deleted });
     }
 
     memoryBills = memoryBills.filter(b => String(b.id) !== id && b.billNo !== id);

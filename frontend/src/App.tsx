@@ -237,8 +237,15 @@ function App() {
     if (!confirmDelete) return;
 
     try {
-      await deleteBill(bill.id, bill.billNo);
-      setSavedBills(prev => prev.filter(b => (bill.id && b.id ? b.id !== bill.id : b !== bill)));
+      await deleteBill(bill.id, bill.billNo, bill);
+      setSavedBills(prev => prev.filter(b => {
+        if (bill.id && b.id && String(b.id) === String(bill.id)) return false;
+        const bKey = `${b.billNo}_${(b.customerName || '').trim()}_${b.totalAmount}_${b.date}`;
+        const targetKey = `${bill.billNo}_${(bill.customerName || '').trim()}_${bill.totalAmount}_${bill.date}`;
+        if (bKey === targetKey) return false;
+        if (b === bill) return false;
+        return true;
+      }));
     } catch (err: any) {
       alert('Error removing bill: ' + err.message);
     }

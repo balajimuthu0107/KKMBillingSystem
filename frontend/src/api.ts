@@ -382,24 +382,6 @@ export const getBills = async (): Promise<SavedBill[]> => {
           };
         });
 
-        // Also merge any offline bills that haven't reached the server
-        const localBills = getLocalBills();
-        if (Array.isArray(localBills) && localBills.length > 0) {
-          const serverKeys = new Set(backendList.map(b => `${b.billNo}_${(b.customerName || '').trim()}_${b.totalAmount}`));
-          for (const lb of localBills) {
-            const key = `${lb.billNo}_${(lb.customerName || '').trim()}_${lb.totalAmount}`;
-            if (!serverKeys.has(key)) {
-              backendList.push(lb);
-              // Non-blocking sync to backend
-              fetch(`${API_BASE_URL}/bills`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(lb)
-              }).catch(() => {});
-            }
-          }
-        }
-
         backendList.sort((a, b) => {
           const customerCompare = `${a.customerName} - ${a.address}`.localeCompare(`${b.customerName} - ${b.address}`);
           return customerCompare
@@ -407,6 +389,7 @@ export const getBills = async (): Promise<SavedBill[]> => {
             || (Number(a.billNo) || 0) - (Number(b.billNo) || 0);
         });
 
+        // Backend is authoritative; keep local storage updated
         saveLocalBills(backendList);
         return backendList;
       }
@@ -511,24 +494,38 @@ export const createBill = async (bill: SavedBill): Promise<SavedBill> => {
   return savedBill;
 };
 
-export const deleteBill = async (id?: number | string, billNo?: string): Promise<void> => {
-  const targetId = id || billNo;
+export const deleteBill = async (id?: number | string, billNo?: string, billDetails?: Partial<SavedBill>): Promise<void> => {
+  const targetId = id ? String(id) : (billNo ? String(billNo) : '');
   if (targetId) {
     try {
-      await fetch(`${API_BASE_URL}/bills/${encodeURIComponent(targetId)}`, { method: 'DELETE' });
-    } catch {
-      // ignore
+      await fetch(`${API_BASE_URL}/bills/${encodeURIComponent(targetId)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          billNo: billNo || billDetails?.billNo,
+          customerName: billDetails?.customerName,
+          totalAmount: billDetails?.totalAmount,
+          date: billDetails?.date
+        })
+      });
+    } catch (err) {
+      console.warn('Backend delete bill error:', err);
     }
   }
 
   const currentBills = getLocalBills();
   const safeBills = Array.isArray(currentBills) ? currentBills : [];
+  const targetKey = billDetails ? `${billNo || billDetails.billNo}_${(billDetails.customerName || '').trim()}_${billDetails.totalAmount}_${billDetails.date}` : '';
+
   saveLocalBills(safeBills.filter(b => {
-    if (id !== undefined && b.id !== undefined) {
-      return b.id !== id;
+    if (id !== undefined && b.id !== undefined && String(b.id) === String(id)) {
+      return false;
     }
-    if (billNo && b.billNo) {
-      return b.billNo !== billNo;
+    if (targetKey) {
+      const bKey = `${b.billNo}_${(b.customerName || '').trim()}_${b.totalAmount}_${b.date}`;
+      if (bKey === targetKey) return false;
+    } else if (billNo && b.billNo && String(b.billNo) === String(billNo)) {
+      return false;
     }
     return true;
   }));
