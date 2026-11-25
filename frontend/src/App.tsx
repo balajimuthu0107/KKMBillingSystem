@@ -604,25 +604,12 @@ function App() {
       )}
       <div className="no-print">
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <h2 style={{ margin: 0 }}>🐟 KKM sea foodz</h2>
-            <span style={{ fontSize: '12px', background: '#e8f5e9', color: '#2e7d32', border: '1px solid #a5d6a7', borderRadius: '12px', padding: '3px 8px', fontWeight: 'bold' }}>
-              🟢 Cloud Synced (MongoDB Atlas)
-            </span>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h2>🐟 KKM sea foodz</h2>
+          <div>
             <button
               className="btn"
-              style={{ backgroundColor: '#28a745', color: '#fff', fontWeight: 'bold' }}
-              onClick={() => fetchData(true)}
-              title="Force sync latest bills and balances from MongoDB Atlas"
-            >
-              🔄 Cloud Sync
-            </button>
-            <button
-              className="btn"
-              style={{ backgroundColor: '#17a2b8', color: '#fff', fontWeight: 'bold' }}
+              style={{ backgroundColor: '#17a2b8', color: '#fff', fontWeight: 'bold', marginRight: '10px' }}
               onClick={() => setShowHistoryModal(true)}
             >
               📜 Previous Bills
