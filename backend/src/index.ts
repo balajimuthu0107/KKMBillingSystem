@@ -24,6 +24,14 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Ensure MongoDB connection is active for each request (vital for serverless deployments)
+app.use(async (_req, _res, next) => {
+  if (!isDbConnected()) {
+    await connectDB().catch(() => {});
+  }
+  next();
+});
+
 // Request logging middleware
 app.use((req, _res, next) => {
   console.log(`[${new Date().toLocaleTimeString()}] ${req.method} ${req.url}`);
@@ -61,12 +69,14 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`====================================================`);
-  console.log(`🚀 KKM Sea Foodz Backend running on http://localhost:${PORT}`);
-  console.log(`🍃 MongoDB Atlas Status: ${isDbConnected() ? 'CONNECTED' : 'STANDBY / FALLBACK MODE'}`);
-  console.log(`📋 API Docs: http://localhost:${PORT}/api`);
-  console.log(`====================================================`);
-});
+if (!process.env.VERCEL && process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`====================================================`);
+    console.log(`🚀 KKM Sea Foodz Backend running on http://localhost:${PORT}`);
+    console.log(`🍃 MongoDB Atlas Status: ${isDbConnected() ? 'CONNECTED' : 'STANDBY / FALLBACK MODE'}`);
+    console.log(`📋 API Docs: http://localhost:${PORT}/api`);
+    console.log(`====================================================`);
+  });
+}
 
 export default app;

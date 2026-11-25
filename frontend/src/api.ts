@@ -1,10 +1,22 @@
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
 const isLocalApiUrl = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(configuredApiUrl || '');
 
-// A localhost API URL is reachable only from the developer's machine, not production visitors.
-const API_BASE_URL = import.meta.env.PROD && isLocalApiUrl
-  ? '/api'
-  : configuredApiUrl || '/api';
+// When running in production OR accessed from another device (like mobile phone over WiFi / LAN / internet),
+// localhost cannot be reached. Fall back to relative '/api' which works through the Vite dev proxy or Vercel serverless.
+export const getApiBaseUrl = (): string => {
+  if (typeof window !== 'undefined') {
+    const isClientOnLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (!isClientOnLocalhost && isLocalApiUrl) {
+      return '/api';
+    }
+  }
+  if (import.meta.env.PROD && isLocalApiUrl) {
+    return '/api';
+  }
+  return configuredApiUrl || '/api';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 export interface CustomerData {
   id?: number | string;
@@ -202,7 +214,7 @@ export const getCustomers = async (): Promise<CustomerData[]> => {
       if (Array.isArray(data) && data.length > 0) {
         const seen = new Set<string>();
         const list = data.filter((c: any) => {
-          const key = (c.name || '').trim().toLowerCase();
+          const key = `${(c.name || '').trim().toLowerCase()}-${(c.address || '').trim().toLowerCase()}`;
           if (seen.has(key)) return false;
           seen.add(key);
           return true;

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { Bill, IBillItem } from '../models/Bill.js';
 import { Customer } from '../models/Customer.js';
-import { isDbConnected } from '../db.js';
+import { isDbConnected, connectDB } from '../db.js';
 
 export interface SavedBill {
   id?: string | number;
@@ -49,6 +49,7 @@ const router = Router();
 // GET all bills
 router.get('/', async (_req: Request, res: Response) => {
   try {
+    await connectDB();
     if (isDbConnected()) {
       const bills = await Bill.find().sort({ createdAt: -1 });
       const sorted = bills.slice().sort((a, b) => {
@@ -96,6 +97,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 // POST save bill
 router.post('/', async (req: Request, res: Response) => {
   try {
+    await connectDB();
     const {
       customerId = '',
       billNo = '',

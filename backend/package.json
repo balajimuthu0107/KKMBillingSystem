@@ -6,8 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
-    "build": "tsc",
+    "start": "tsx src/index.ts",
+    "build": "tsc --noEmit",
     "seed": "tsx src/seed.ts"
   },
   "keywords": ["billing", "mongodb", "mongoose", "express", "nodejs", "atlas"],
@@ -17,7 +17,8 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "mongoose": "^8.9.5"
+    "mongoose": "^8.9.5",
+    "tsx": "^4.19.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

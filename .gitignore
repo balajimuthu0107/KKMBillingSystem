@@ -34,4 +34,7 @@ yarn-debug.log*
 yarn-error.log*
 test_firestore.mjs
 *.mjs
+check_db.ts
+seed_bills.ts
+
 

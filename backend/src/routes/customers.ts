@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { Customer } from '../models/Customer.js';
-import { isDbConnected } from '../db.js';
+import { isDbConnected, connectDB } from '../db.js';
 
 export interface CustomerData {
   id: string | number;
@@ -39,6 +39,7 @@ const router = Router();
 // GET all customers
 router.get('/', async (_req: Request, res: Response) => {
   try {
+    await connectDB();
     if (isDbConnected()) {
       let customers = await Customer.find().sort({ name: 1 });
       if (customers.length === 0) {
@@ -80,6 +81,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 // POST create customer
 router.post('/', async (req: Request, res: Response) => {
   try {
+    await connectDB();
     const { name, address = '', balance = 0 } = req.body;
     if (!name || typeof name !== 'string') {
       return res.status(400).json({ error: 'Customer name is required' });
@@ -119,7 +121,8 @@ router.post('/', async (req: Request, res: Response) => {
 // PUT update customer
 router.put('/:id', async (req: Request, res: Response) => {
   try {
-    const id = req.params.id;
+    await connectDB();
+    const id = String(req.params.id);
     const { name, address, balance, lastBillNo } = req.body;
 
     const updateFields: any = {};
@@ -129,7 +132,18 @@ router.put('/:id', async (req: Request, res: Response) => {
     if (lastBillNo !== undefined) updateFields.lastBillNo = Number(lastBillNo) || 0;
 
     if (isDbConnected()) {
-      const updated = await Customer.findByIdAndUpdate(id, updateFields, { new: true });
+      let updated = null;
+      if (id && id.match(/^[0-9a-fA-F]{24}$/)) {
+        updated = await Customer.findByIdAndUpdate(id, updateFields, { new: true });
+      }
+      if (!updated && (name || updateFields.name)) {
+        const queryName = updateFields.name || String(name).trim();
+        updated = await Customer.findOneAndUpdate(
+          { name: queryName },
+          updateFields,
+          { new: true }
+        );
+      }
       if (!updated) return res.status(404).json({ error: 'Customer not found' });
       return res.json(updated);
     }

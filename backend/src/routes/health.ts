@@ -1,9 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { isDbConnected } from '../db.js';
+import { isDbConnected, connectDB } from '../db.js';
 
 const router = Router();
 
-router.get('/', (_req: Request, res: Response) => {
+router.get('/', async (_req: Request, res: Response) => {
+  await connectDB();
   const connected = isDbConnected();
 
   res.json({

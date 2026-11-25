@@ -67,9 +67,9 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchData = async () => {
+  const fetchData = async (showLoading = true) => {
     try {
-      setLoading(true);
+      if (showLoading) setLoading(true);
 
       try {
         const customersData = await getCustomers();
@@ -96,8 +96,16 @@ function App() {
               const updated = { ...prev };
               sortedBills.forEach(b => {
                 const customer = b.customerId ? updated[b.customerId] : undefined;
-                if (customer) {
-                  customer.balance = Number(b.finalBalance) || 0;
+                const matchByName = Object.values(updated).find(c =>
+                  c && c.name && b.customerName &&
+                  c.name.trim().toLowerCase() === b.customerName.trim().toLowerCase()
+                );
+                const target = customer || matchByName;
+                if (target) {
+                  // If target already has an explicit balance from Customer model, keep it; otherwise set from bill
+                  if ((target.balance === 0 || target.balance === undefined) && Number(b.finalBalance) > 0) {
+                    target.balance = Number(b.finalBalance) || 0;
+                  }
                 }
               });
               return updated;
@@ -110,12 +118,37 @@ function App() {
     } catch (err: any) {
       console.warn('Initial data load warning:', err);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchData();
+
+    // Auto-refresh when tab/window gains focus (cross-device sync)
+    const handleFocus = () => {
+      fetchData(false);
+    };
+    window.addEventListener('focus', handleFocus);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchData(false);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Auto-poll MongoDB Atlas every 6 seconds so updates appear without manual refresh
+    const pollTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchData(false);
+      }
+    }, 6000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(pollTimer);
+    };
   }, []);
 
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -225,7 +258,10 @@ function App() {
     }
     setCustomerName(customer.name);
     setAddress(customer.address || '');
-    setPrevBalance(customer.balance === 0 ? '' : String(customer.balance));
+    const effBal = (customer.balance !== undefined && customer.balance > 0)
+      ? customer.balance
+      : getEffectiveBalance(customerId);
+    setPrevBalance(effBal > 0 ? String(effBal) : '');
 
     const customerBills = savedBills.filter(b => b.customerId === customerId || (customer.name && b.customerName === customer.name));
     const maxBillNo = customerBills.reduce((max, b) => Math.max(max, Number(b.billNo) || 0), Number(customer.lastBillNo) || 0);
@@ -256,10 +292,8 @@ function App() {
         return (bName === trimmedName || (trimmedName.includes('SRS') && bName.includes('SRS'))) &&
           (!bAddr || !trimmedAddr || bAddr === trimmedAddr);
       });
-      if ((!bal || bal === 0) && !hasBillsForCustomer) {
-        bal = 0;
-      }
-      setPrevBalance(bal === 0 ? '' : bal.toString());
+      const effBal = (bal && bal > 0) ? bal : (hasBillsForCustomer ? getEffectiveBalance(matchedKey) : 0);
+      setPrevBalance(effBal > 0 ? String(effBal) : '');
     } else {
       setPrevBalance('');
     }
@@ -426,9 +460,9 @@ function App() {
   };
 
   const handleSavePayment = async () => {
-
-    const resolvedKey = resolveCustomerKey(paymentCustomerKey);
-    if (!resolvedKey || !savedCustomers[resolvedKey]) {
+    const resolvedKey = resolveCustomerKey(paymentCustomerKey) || paymentCustomerKey;
+    const customer = savedCustomers[resolvedKey] || Object.values(savedCustomers).find(c => String(c.id) === resolvedKey || c.name === resolvedKey);
+    if (!customer) {
       alert("Please select a valid customer from the list.");
       return;
     }
@@ -438,9 +472,8 @@ function App() {
       return;
     }
 
-    const customer = savedCustomers[resolvedKey];
-    const currentBalance = getEffectiveBalance(resolvedKey);
-    const newBalance = currentBalance - payAmt;
+    const currentBalance = getEffectiveBalance(resolvedKey) || Number(customer.balance) || 0;
+    const newBalance = Math.max(0, currentBalance - payAmt);
 
     try {
       const updatedCustomerData = {
@@ -453,32 +486,57 @@ function App() {
         updatedCustomerData.id = savedCust.id;
       }
 
-
+      const custKey = resolvedKey in savedCustomers ? resolvedKey : String(customer.id || resolvedKey);
       const updatedCustomers = {
         ...savedCustomers,
-        [resolvedKey]: updatedCustomerData
+        [custKey]: updatedCustomerData
       };
-
       setSavedCustomers(updatedCustomers);
 
+      // Create and save payment transaction receipt in MongoDB Atlas
+      const paymentReceiptBill: SavedBill = {
+        customerId: String(customer.id || resolvedKey),
+        billNo: `REC-${Date.now().toString().slice(-4)}`,
+        date: formatDateToDMY(getTodayDate()),
+        customerName: customer.name,
+        address: customer.address || '',
+        items: [
+          {
+            id: Date.now().toString(),
+            particulars: 'முந்தைய இருப்பு வரவு (Payment Received)',
+            quantity: '1',
+            qty: '1',
+            price: '0',
+            rate: '0',
+            amount: 0
+          }
+        ],
+        previousBalance: currentBalance,
+        advance: payAmt,
+        totalAmount: currentBalance,
+        finalBalance: newBalance
+      };
 
-      setSavedBills(prev => {
-        const customerBills = prev.filter(b => b.customerId === resolvedKey);
-        if (customerBills.length === 0) return prev;
-        const sorted = [...customerBills].sort((a, b) => (Number(b.billNo) || 0) - (Number(a.billNo) || 0));
-        const latestBillNo = sorted[0].billNo;
-        return prev.map(b => {
-          if (b.customerId === resolvedKey && b.billNo === latestBillNo) return { ...b, finalBalance: newBalance };
-          return b;
-        });
-      });
+      try {
+        const savedReceipt = await createBill(paymentReceiptBill);
+        setSavedBills(prev => [savedReceipt, ...prev]);
+      } catch (receiptErr) {
+        console.warn('Payment receipt bill creation:', receiptErr);
+      }
+
+      // If this customer is currently active on the bill form, sync their previous balance
+      if (selectedCustomerId === custKey || selectedCustomerId === resolvedKey) {
+        setPrevBalance(newBalance > 0 ? String(newBalance) : '');
+      }
 
       alert(`Payment Saved! ${customer.name}'s new balance is Rs.${formatCurrency(newBalance)}`);
-
 
       setShowPaymentModal(false);
       setPaymentCustomerKey('');
       setPaymentAmount('');
+
+      // Refresh data silently to ensure all devices stay in sync
+      fetchData(false);
     } catch (err: any) {
       alert('Error saving payment: ' + err.message);
     }
@@ -488,34 +546,45 @@ function App() {
     return num.toLocaleString('en-IN');
   };
 
-
   const resolveCustomerKey = (inputKey: string): string | null => {
     if (!inputKey) return null;
-    return savedCustomers[inputKey] ? inputKey : null;
+    if (savedCustomers[inputKey]) return inputKey;
+    const match = Object.keys(savedCustomers).find(k => {
+      const c = savedCustomers[k];
+      return c && c.name && (c.name.trim().toLowerCase() === inputKey.trim().toLowerCase() ||
+        `${c.name} - ${c.address}`.trim().toLowerCase() === inputKey.trim().toLowerCase());
+    });
+    return match || null;
   };
 
-
   const getEffectiveBalance = (customerKey: string): number => {
+    if (!customerKey) return 0;
     const resolvedKey = resolveCustomerKey(customerKey);
-    const customer = resolvedKey ? savedCustomers[resolvedKey] : savedCustomers[customerKey];
+    const customer = (resolvedKey ? savedCustomers[resolvedKey] : savedCustomers[customerKey])
+      || Object.values(savedCustomers).find(c => c && (String(c.id) === customerKey || c.name === customerKey));
     if (!customer) return 0;
 
+    // 1. Check direct balance stored in customer profile (from MongoDB Atlas)
+    if (customer.balance !== undefined && Number(customer.balance) > 0) {
+      return Number(customer.balance);
+    }
 
-    if (customer.balance && customer.balance !== 0) return customer.balance;
-
-
+    // 2. Check saved bills for this customer
     const customerId = String(customer.id || resolvedKey || customerKey);
-    const customerBills = savedBills.filter(b => b.customerId === customerId);
+    const cName = (customer.name || '').trim().toLowerCase();
+    const customerBills = savedBills.filter(b => {
+      if (b.customerId && String(b.customerId) === customerId) return true;
+      if (b.customerName && b.customerName.trim().toLowerCase() === cName) return true;
+      if (cName.includes('srs') && (b.customerName || '').toLowerCase().includes('srs')) return true;
+      return false;
+    });
 
-    if (customerBills.length === 0) return 0;
-
+    if (customerBills.length === 0) return Number(customer.balance) || 0;
 
     const sortedBills = [...customerBills].sort((a, b) => (Number(b.billNo) || 0) - (Number(a.billNo) || 0));
     const latestBillBalance = Number(sortedBills[0].finalBalance) || 0;
 
-
-    if (latestBillBalance !== 0) return latestBillBalance;
-    return 0;
+    return latestBillBalance || Number(customer.balance) || 0;
   };
 
   const selectedCustomer = savedCustomers[selectedCustomerId];
@@ -535,12 +604,25 @@ function App() {
       )}
       <div className="no-print">
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <h2>🐟 KKM sea foodz</h2>
-          <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <h2 style={{ margin: 0 }}>🐟 KKM sea foodz</h2>
+            <span style={{ fontSize: '12px', background: '#e8f5e9', color: '#2e7d32', border: '1px solid #a5d6a7', borderRadius: '12px', padding: '3px 8px', fontWeight: 'bold' }}>
+              🟢 Cloud Synced (MongoDB Atlas)
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button
               className="btn"
-              style={{ backgroundColor: '#17a2b8', color: '#fff', fontWeight: 'bold', marginRight: '10px' }}
+              style={{ backgroundColor: '#28a745', color: '#fff', fontWeight: 'bold' }}
+              onClick={() => fetchData(true)}
+              title="Force sync latest bills and balances from MongoDB Atlas"
+            >
+              🔄 Cloud Sync
+            </button>
+            <button
+              className="btn"
+              style={{ backgroundColor: '#17a2b8', color: '#fff', fontWeight: 'bold' }}
               onClick={() => setShowHistoryModal(true)}
             >
               📜 Previous Bills
@@ -548,7 +630,12 @@ function App() {
             <button
               className="btn"
               style={{ backgroundColor: '#ffc107', color: '#000', fontWeight: 'bold' }}
-              onClick={() => setShowPaymentModal(true)}
+              onClick={() => {
+                if (selectedCustomerId) {
+                  setPaymentCustomerKey(selectedCustomerId);
+                }
+                setShowPaymentModal(true);
+              }}
             >
               💰 முந்தைய இருப்பு (Receive Payment)
             </button>
@@ -860,15 +947,16 @@ function App() {
             </div>
 
             {(() => {
-              const resolvedKey = resolveCustomerKey(paymentCustomerKey);
-              if (!paymentCustomerKey || !resolvedKey) return null;
+              const resolvedKey = resolveCustomerKey(paymentCustomerKey) || paymentCustomerKey;
+              if (!paymentCustomerKey) return null;
               const effectiveBal = getEffectiveBalance(resolvedKey);
+              const custObj = savedCustomers[resolvedKey] || Object.values(savedCustomers).find(c => String(c.id) === resolvedKey || c.name === resolvedKey);
+              const displayBal = effectiveBal > 0 ? effectiveBal : (custObj?.balance || 0);
               return (
-                <div style={{ backgroundColor: effectiveBal > 0 ? '#fff3cd' : '#d1e7dd', padding: '10px', borderRadius: '5px', marginBottom: '1rem', border: `1px solid ${effectiveBal > 0 ? '#ffc107' : '#0f5132'}` }}>
-                  <p style={{ margin: 0, color: effectiveBal > 0 ? '#856404' : '#0f5132', fontWeight: 'bold', fontSize: '1.05rem' }}>
-                    {effectiveBal > 0 ? '⚠️' : '✅'} Current Pending Balance: Rs. {formatCurrency(effectiveBal)}
+                <div style={{ backgroundColor: displayBal > 0 ? '#fff3cd' : '#d1e7dd', padding: '12px', borderRadius: '6px', marginBottom: '1rem', border: `1px solid ${displayBal > 0 ? '#ffc107' : '#0f5132'}` }}>
+                  <p style={{ margin: 0, color: displayBal > 0 ? '#856404' : '#0f5132', fontWeight: 'bold', fontSize: '1.05rem' }}>
+                    {displayBal > 0 ? '⚠️' : '✅'} Current Pending Balance (முன் பாக்கி): Rs. {formatCurrency(displayBal)}
                   </p>
-
                 </div>
               );
             })()}
